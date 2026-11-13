@@ -5,10 +5,9 @@ incentiva o descarte de eletrônicos em pontos de coleta. O cidadão registra o
 item, acompanha a pesagem e o depósito simulados e usa os pontos recebidos
 para resgatar benefícios fictícios.
 
-O Bloco 1 entrega a aplicação de base, o health check e os contratos dos 17
-endpoints planejados. Consulte a [especificação OpenAPI](src/main/resources/static/docs/openapi.yaml)
-para integrar o aplicativo mobile e o simulador conforme cada operação for
-implementada.
+O backend disponibiliza o health check e três consultas do catálogo no perfil
+`bootstrap`. A [especificação OpenAPI](src/main/resources/static/docs/openapi.yaml)
+documenta essas consultas e os outros 14 endpoints planejados para o MVP.
 
 ## Pré-requisitos
 
@@ -60,10 +59,73 @@ curl -fsS http://localhost:8080/actuator/health
 
 A resposta esperada é `{"status":"UP"}`. Abra o [Swagger UI local](http://localhost:8080/swagger-ui.html)
 para consultar os contratos, ou acesse o [YAML servido pela aplicação](http://localhost:8080/docs/openapi.yaml).
-O título marca os 17 contratos como planejados e o envio de requisições pelo
-Swagger fica desabilitado nesta etapa. O filtro de segurança libera o health
-check e os recursos necessários para essa documentação. As rotas de negócio
-estão bloqueadas.
+Os resumos das três consultas indicam que elas estão implementadas no
+`bootstrap`. O Swagger UI fica em modo de consulta. Use os comandos abaixo
+para chamar o catálogo. As demais rotas de negócio permanecem bloqueadas.
+
+## Consultar o catálogo
+
+No perfil `bootstrap`, as três consultas aceitam chamadas sem JWT e retornam
+dados fictícios. Fora desse perfil, o filtro exige autenticação para o
+catálogo. A disponibilização do catálogo nesses ambientes depende do
+adaptador PostgreSQL e da integração JWT.
+
+```sh
+curl -fsS http://localhost:8080/api/v1/collection-points
+curl -fsS http://localhost:8080/api/v1/collection-points/1
+curl -fsS http://localhost:8080/api/v1/electronic-categories
+curl -i http://localhost:8080/api/v1/collection-points/999
+```
+
+A lista de pontos responde `200` com um array, inclusive `[]` quando estiver
+vazia. A resposta de demonstração inclui, por exemplo:
+
+```json
+[
+  {"id": 1, "name": "Ecoponto Centro", "address": "Rua Exemplo, 100", "latitude": -20.45, "longitude": -54.62, "isActive": true},
+  {"id": 2, "name": "Ecoponto Bairro Norte", "address": "Rua Demonstração, 250", "latitude": -20.42, "longitude": -54.61, "isActive": false}
+]
+```
+
+O detalhe de `/collection-points/1` responde `200` com as categorias
+aceitas e os coletores do local.
+
+```json
+{
+  "id": 1,
+  "name": "Ecoponto Centro",
+  "address": "Rua Exemplo, 100",
+  "latitude": -20.45,
+  "longitude": -54.62,
+  "isActive": true,
+  "acceptedCategoryIds": [1, 2, 3, 4],
+  "devices": [{"deviceId": "COL-001", "isActive": true}]
+}
+```
+
+A lista de categorias responde `200`. Os valores são os parâmetros
+armazenados no catálogo.
+
+```json
+[
+  {"id": 1, "name": "Celulares", "basePoints": 30, "pointsPerKg": 5, "maxPoints": 40, "minWeightKg": 0.05, "maxWeightKg": 2.0},
+  {"id": 2, "name": "Notebooks", "basePoints": 25, "pointsPerKg": 5, "maxPoints": 45, "minWeightKg": 0.5, "maxWeightKg": 6.0},
+  {"id": 3, "name": "Pequenos eletrodomésticos", "basePoints": 10, "pointsPerKg": 4, "maxPoints": 35, "minWeightKg": 0.25, "maxWeightKg": 15.0},
+  {"id": 4, "name": "Cabos e carregadores", "basePoints": 0, "pointsPerKg": 4, "maxPoints": 25, "minWeightKg": 0.01, "maxWeightKg": 8.0}
+]
+```
+
+Um ID positivo inexistente retorna `404`. IDs inválidos, como `0` ou
+`abc`, retornam `400`.
+
+```json
+{
+  "status": 404,
+  "code": "RESOURCE_NOT_FOUND",
+  "message": "Recurso não encontrado.",
+  "timestamp": "2026-11-12T22:30:00Z"
+}
+```
 
 ## Integrar com PostgreSQL
 
@@ -94,6 +156,15 @@ em arquivos locais ignorados pelo Git ou no gerenciador de segredos do
 ambiente. A proposta de [esquema PostgreSQL](docs/database/schema-contract.md)
 serve de referência para o alinhamento com a equipe de banco.
 
+Os serviços do catálogo consultam as interfaces `CollectionPointRepository`
+e `ElectronicCategoryRepository`. Hoje, `InMemoryCollectionCatalog`
+implementa ambas com listas imutáveis carregadas no perfil `bootstrap`.
+Após a aprovação do esquema, implementações com Spring Data JPA para o
+perfil `postgres` poderão preencher os mesmos modelos de leitura. Nessa
+entrega futura, os controllers e services serão habilitados também em
+`postgres`. O [mapeamento de campos do catálogo](docs/database/schema-contract.md#campos-consumidos-pelo-catálogo)
+identifica os dados necessários para essa substituição.
+
 ## Estrutura
 
 ```text
@@ -108,8 +179,11 @@ serve de referência para o alinhamento com a equipe de banco.
 └── src/main/
     ├── java/br/com/fiap/reloop/
     │   ├── ReLoopApplication.java
-    │   ├── auth/ user/ collection/ disposal/
+    │   ├── auth/ user/ disposal/
     │   ├── iot/ wallet/ reward/ upload/
+    │   ├── collection/
+    │   │   ├── controller/ dto/ model/
+    │   │   └── repository/ service/
     │   ├── security/
     │   └── shared/web/
     └── resources/

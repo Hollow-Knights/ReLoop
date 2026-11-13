@@ -1,12 +1,15 @@
 openapi: 3.0.3
 info:
-  title: ReLoop API v1 — contratos planejados
+  title: ReLoop API v1
   version: 1.0.0
   description: |
-    Contrato do MVP acadêmico Ecoponto (ReLoop). Os 17 endpoints de negócio abaixo
-    estão planejados. Nesta entrega, os serviços operacionais são o health check em
-    `/actuator/health` e a documentação no perfil `bootstrap`.
-    O Swagger UI disponibiliza os modelos para consulta.
+    Contrato do MVP acadêmico Ecoponto (ReLoop). As três consultas do catálogo
+    estão implementadas e identificadas nos resumos. Os outros 14 endpoints
+    são planejados. No perfil local `bootstrap`, as consultas do catálogo usam
+    dados fictícios e dispensam JWT. O contrato de autenticação Bearer vale
+    para a futura execução do catálogo nos demais perfis.
+    O Swagger UI disponibiliza os modelos para consulta. O health check está
+    disponível em `/actuator/health`.
     Os campos JSON usam camelCase. Datas são emitidas em UTC no formato ISO 8601.
 servers:
   - url: /
@@ -136,7 +139,8 @@ paths:
     get:
       tags: [Pontos de coleta]
       operationId: listCollectionPoints
-      summary: Listar pontos de coleta
+      summary: Listar pontos de coleta (implementado no bootstrap)
+      description: No perfil bootstrap, a consulta funciona sem JWT e retorna [] quando a lista está vazia.
       responses:
         '200':
           description: Locais de coleta.
@@ -157,7 +161,8 @@ paths:
     get:
       tags: [Pontos de coleta]
       operationId: getCollectionPoint
-      summary: Consultar ponto de coleta, categorias aceitas e coletores
+      summary: Consultar ponto de coleta, categorias aceitas e coletores (implementado no bootstrap)
+      description: No perfil bootstrap, a consulta funciona sem JWT. Um ID positivo inexistente retorna 404.
       responses:
         '200':
           description: Detalhes do local.
@@ -178,12 +183,12 @@ paths:
     get:
       tags: [Categorias]
       operationId: listElectronicCategories
-      summary: Listar categorias e parâmetros de pontuação
+      summary: Listar categorias e parâmetros de pontuação (implementado no bootstrap)
       description: |
-        O backend valida o peso dentro do intervalo inclusivo da categoria e calcula
-        `min(maxPoints, roundHalfUp(basePoints + weightKg * pointsPerKg))` usando
-        aritmética decimal. Um pequeno eletrodoméstico de 3,8 kg gera 25 pontos
-        com base 10, 4 pontos por kg e máximo 35.
+        No perfil bootstrap, a consulta funciona sem JWT e retorna os parâmetros
+        armazenados no catálogo. No fluxo futuro de descarte, o backend validará
+        o peso no intervalo inclusivo da categoria e calculará
+        `min(maxPoints, roundHalfUp(basePoints + weightKg * pointsPerKg))`.
       responses:
         '200':
           description: Categorias disponíveis.
