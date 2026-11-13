@@ -5,9 +5,10 @@ incentiva o descarte de eletrônicos em pontos de coleta. O cidadão registra o
 item, acompanha a pesagem e o depósito simulados e usa os pontos recebidos
 para resgatar benefícios fictícios.
 
-O backend disponibiliza o health check e três consultas do catálogo no perfil
-`bootstrap`. A [especificação OpenAPI](src/main/resources/static/docs/openapi.yaml)
-documenta essas consultas e os outros 14 endpoints planejados para o MVP.
+O backend disponibiliza o health check, três consultas do catálogo e o fluxo
+de fotos e descartes no perfil `bootstrap`. A
+[especificação OpenAPI](src/main/resources/static/docs/openapi.yaml) indica
+quais operações estão implementadas e quais ainda estão planejadas.
 
 ## Pré-requisitos
 
@@ -59,9 +60,9 @@ curl -fsS http://localhost:8080/actuator/health
 
 A resposta esperada é `{"status":"UP"}`. Abra o [Swagger UI local](http://localhost:8080/swagger-ui.html)
 para consultar os contratos, ou acesse o [YAML servido pela aplicação](http://localhost:8080/docs/openapi.yaml).
-Os resumos das três consultas indicam que elas estão implementadas no
-`bootstrap`. O Swagger UI fica em modo de consulta. Use os comandos abaixo
-para chamar o catálogo. As demais rotas de negócio permanecem bloqueadas.
+Os resumos indicam quais operações estão implementadas no `bootstrap`.
+O Swagger UI fica em modo de consulta. Use os exemplos abaixo para chamar
+o catálogo e o fluxo de descartes. As rotas planejadas permanecem bloqueadas.
 
 ## Consultar o catálogo
 
@@ -83,7 +84,8 @@ vazia. A resposta de demonstração inclui, por exemplo:
 ```json
 [
   {"id": 1, "name": "Ecoponto Centro", "address": "Rua Exemplo, 100", "latitude": -20.45, "longitude": -54.62, "isActive": true},
-  {"id": 2, "name": "Ecoponto Bairro Norte", "address": "Rua Demonstração, 250", "latitude": -20.42, "longitude": -54.61, "isActive": false}
+  {"id": 2, "name": "Ecoponto Bairro Norte", "address": "Rua Demonstração, 250", "latitude": -20.42, "longitude": -54.61, "isActive": false},
+  {"id": 3, "name": "Ecoponto Bairro Sul", "address": "Rua Demonstração, 350", "latitude": -20.49, "longitude": -54.63, "isActive": true}
 ]
 ```
 
@@ -127,6 +129,58 @@ Um ID positivo inexistente retorna `404`. IDs inválidos, como `0` ou
 }
 ```
 
+## Enviar fotos e gerenciar descartes
+
+Execute a aplicação com o perfil `bootstrap`, conforme a seção anterior.
+O perfil usa um único usuário demonstrativo para todas as requisições.
+
+| Operação | Resultado |
+| --- | --- |
+| `POST /api/v1/uploads` | `201` com `photoId` e `photoUrl`. |
+| `POST /api/v1/disposals` | `201` com o descarte em `WAITING_WEIGHT`. |
+| `GET /api/v1/disposals/{id}` | `200` com o estado atual do descarte. |
+| `DELETE /api/v1/disposals/{id}` | `204` ao cancelar um descarte que aguarda pesagem. |
+| `GET /api/v1/users/me/disposals` | `200` com o histórico, do mais recente ao mais antigo, incluindo cancelados. |
+
+Envie um JPEG ou PNG de até 10 MiB como a parte multipart `file`. O backend
+valida o formato e tenta decodificar a imagem. A rota auxiliar
+`GET /api/v1/uploads/{photoId}` entrega a foto quando o usuário atual é o
+proprietário.
+
+```sh
+curl -fsS -F 'file=@/caminho/para/foto.png' http://localhost:8080/api/v1/uploads
+# Copie os valores photoId e photoUrl da resposta.
+photo_id='UUID retornado no upload'
+photo_url='URI absoluta retornada no upload'
+curl -fsS "$photo_url" -o /tmp/reloop-foto.png
+
+curl -fsS -X POST http://localhost:8080/api/v1/disposals \
+  -H 'Content-Type: application/json' \
+  -d "{\"deviceId\":\"COL-001\",\"categoryId\":3,\"itemName\":\"Air fryer\",\"photoId\":\"$photo_id\"}"
+
+# Substitua 1 pelo id retornado pelo cadastro.
+curl -fsS http://localhost:8080/api/v1/disposals/1
+curl -i -X DELETE http://localhost:8080/api/v1/disposals/1
+curl -fsS http://localhost:8080/api/v1/users/me/disposals
+```
+
+O descarte começa com `weightKg` e `estimatedPoints` nulos e
+`awardedPoints` igual a zero. O histórico usa `categoryId`. O cancelamento
+libera o coletor e mantém a foto vinculada ao descarte cancelado.
+
+`PHOTO_BASE_URL` define a base absoluta de `photoUrl`. O padrão usa
+`http://localhost` e a porta da aplicação. Para abrir a foto em um
+dispositivo físico na mesma rede, informe a URL HTTP(S) acessível por ele,
+por exemplo `PHOTO_BASE_URL=http://192.168.1.20:8080`. A base aceita um
+prefixo de caminho quando o ambiente é servido por um proxy.
+
+Os descartes e os metadados das fotos são mantidos em memória por processo.
+Os arquivos são gravados em um diretório temporário privado com prefixo
+`reloop-photos-`, sob `java.io.tmpdir`. O encerramento normal remove esse
+diretório. Após uma interrupção forçada, localize a pasta da execução
+encerrada no diretório temporário do sistema e remova-a manualmente. Cada
+reinício começa com histórico vazio e novas associações de fotos.
+
 ## Integrar com PostgreSQL
 
 Um profile é um conjunto de configurações ativado na inicialização. Escolha
@@ -164,6 +218,14 @@ perfil `postgres` poderão preencher os mesmos modelos de leitura. Nessa
 entrega futura, os controllers e services serão habilitados também em
 `postgres`. O [mapeamento de campos do catálogo](docs/database/schema-contract.md#campos-consumidos-pelo-catálogo)
 identifica os dados necessários para essa substituição.
+
+Para descartes, o adaptador PostgreSQL implementará `DisposalRepository`,
+mantendo a reserva do coletor e da foto atômica com o cadastro. Os metadados
+da foto poderão ser persistidos via `PhotoStorage` e o arquivo poderá usar
+armazenamento durável. A integração JWT fornecerá uma implementação de
+`CurrentUserProvider` que extrai a identidade autenticada do contexto do
+Spring Security. Os controllers e services do fluxo poderão ser ativados
+nos perfis que tiverem essas implementações.
 
 ## Estrutura
 

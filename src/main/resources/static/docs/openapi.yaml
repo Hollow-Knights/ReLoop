@@ -3,11 +3,12 @@ info:
   title: ReLoop API v1
   version: 1.0.0
   description: |
-    Contrato do MVP acadêmico Ecoponto (ReLoop). As três consultas do catálogo
-    estão implementadas e identificadas nos resumos. Os outros 14 endpoints
-    são planejados. No perfil local `bootstrap`, as consultas do catálogo usam
-    dados fictícios e dispensam JWT. O contrato de autenticação Bearer vale
-    para a futura execução do catálogo nos demais perfis.
+    Contrato do MVP acadêmico Ecoponto (ReLoop). As consultas do catálogo e
+    as operações de fotos e descartes implementadas estão identificadas nos
+    resumos. No perfil local `bootstrap`, elas dispensam JWT. O catálogo usa
+    dados fictícios e as operações de fotos e descartes usam um único usuário
+    demonstrativo. O contrato de autenticação Bearer vale para a futura
+    execução dessas operações nos demais perfis.
     O Swagger UI disponibiliza os modelos para consulta. O health check está
     disponível em `/actuator/health`.
     Os campos JSON usam camelCase. Datas são emitidas em UTC no formato ISO 8601.
@@ -207,10 +208,11 @@ paths:
     post:
       tags: [Fotos]
       operationId: uploadPhoto
-      summary: Enviar foto do eletrônico
+      summary: Enviar foto do eletrônico (implementado no bootstrap)
       description: |
         Recebe um arquivo JPEG ou PNG de 1 byte a 10 MiB. A foto é vinculada ao usuário
-        autenticado e poderá ser associada a um descarte dele.
+        atual e poderá ser associada a um descarte dele. A URL absoluta é retornada
+        em `photoUrl` para consultar a foto.
       requestBody:
         required: true
         content:
@@ -246,14 +248,55 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/uploads/{photoId}:
+    get:
+      tags: [Fotos]
+      operationId: getUploadedPhoto
+      summary: Consultar foto pela URL retornada no upload (implementado no bootstrap)
+      description: Disponibiliza a fotografia somente ao seu proprietário.
+      parameters:
+        - name: photoId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/PhotoId'
+      responses:
+        '200':
+          description: Fotografia do eletrônico.
+          headers:
+            Cache-Control:
+              description: Resposta privada com armazenamento em cache desabilitado.
+              schema:
+                type: string
+                example: no-store
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/disposals:
     post:
       tags: [Descartes]
       operationId: startDisposal
-      summary: Iniciar descarte
+      summary: Iniciar descarte (implementado no bootstrap)
       description: |
         O coletor e seu ponto de coleta devem estar ativos, e o ponto deve aceitar
         a categoria. A foto deve pertencer ao cidadão e estar livre para associação.
+        Cada coletor admite uma sessão ativa por vez. O usuário é identificado pelo
+        contexto da requisição.
       requestBody:
         required: true
         content:
@@ -278,7 +321,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '409':
-          description: Foto já associada (PHOTO_ALREADY_LINKED) ou coletor ou ponto de coleta inativo (DEVICE_UNAVAILABLE).
+          description: Foto já associada (PHOTO_ALREADY_LINKED), coletor ocupado ou coletor ou ponto de coleta inativo (DEVICE_UNAVAILABLE).
           content:
             application/json:
               schema:
@@ -298,7 +341,7 @@ paths:
     get:
       tags: [Descartes]
       operationId: getDisposal
-      summary: Consultar descarte do usuário autenticado
+      summary: Consultar descarte do usuário atual (implementado no bootstrap)
       responses:
         '200':
           description: Estado atual do descarte do usuário.
@@ -317,8 +360,8 @@ paths:
     delete:
       tags: [Descartes]
       operationId: cancelDisposal
-      summary: Cancelar descarte que aguarda pesagem
-      description: O registro do usuário passa de WAITING_WEIGHT para CANCELLED e permanece no histórico.
+      summary: Cancelar descarte que aguarda pesagem (implementado no bootstrap)
+      description: O registro do usuário passa de WAITING_WEIGHT para CANCELLED, permanece no histórico e libera o coletor.
       responses:
         '204':
           description: Descarte cancelado. Sem corpo na resposta.
@@ -337,10 +380,10 @@ paths:
     get:
       tags: [Descartes]
       operationId: listMyDisposals
-      summary: Listar histórico de descartes do usuário autenticado
+      summary: Listar histórico de descartes do usuário atual (implementado no bootstrap)
       responses:
         '200':
-          description: Descartes do usuário, inclusive os cancelados.
+          description: Descartes do usuário do mais recente ao mais antigo, inclusive os cancelados. Retorna um array vazio se não houver registros.
           content:
             application/json:
               schema:
@@ -609,8 +652,8 @@ components:
     PhotoUrl:
       type: string
       format: uri
-      description: URL autorizada para visualizar a foto. Pode ter validade limitada.
-      example: https://media.example.com/photos/0bcc2e7b-3d69-4af4-bfd9-5ed1f62985a5
+      description: URL absoluta autorizada para visualizar a foto. Pode ter validade limitada.
+      example: http://localhost:8080/api/v1/uploads/0bcc2e7b-3d69-4af4-bfd9-5ed1f62985a5
     Points:
       type: integer
       format: int32

@@ -131,10 +131,26 @@ no fluxo de descarte.
 
 A configuração HTTP é sem sessão. O health check é público e exibe apenas o
 estado agregado. No perfil `bootstrap`, o filtro também libera o Swagger UI,
-sua configuração, o YAML e os três GETs do catálogo. Fora desse perfil, o
-filtro exige autenticação para as consultas do catálogo, cuja fonte de dados
-está disponível apenas no `bootstrap`. As demais rotas ficam bloqueadas.
-A dependência OAuth2 Resource Server prepara a futura validação de JWT. A
-emissão de tokens, a configuração do decodificador e a autenticação do
-dispositivo fazem parte da implementação futura. O tratamento de exceções
-MVC e os erros do filtro de segurança usam o modelo `ApiError`.
+sua configuração, o YAML e as combinações de método e rota implementadas
+para catálogo, fotos e descartes. O perfil usa `BootstrapCurrentUserProvider`
+para representar um usuário de demonstração. Os serviços verificam a
+titularidade das fotos e dos descartes pela identidade obtida do provider.
+Fora do `bootstrap`, o filtro exige autenticação para essas operações. A
+implementação futura de `CurrentUserProvider` extrairá a identidade do JWT
+validado pelo Spring Security. O tratamento de exceções MVC e os erros do
+filtro usam o modelo `ApiError`.
+
+## Cadastro e cancelamento no bootstrap
+
+`UploadController` recebe a foto multipart e `PhotoService` valida o
+conteúdo antes de gravá-lo por `PhotoStorage`. O adaptador temporário gera
+um UUID, guarda o arquivo fora do repositório e mantém os metadados em
+memória. A URL de leitura é montada a partir da base configurada.
+
+`DisposalController` converte o JSON em `CreateDisposalRequest` e valida o
+DTO. `DisposalService` consulta os serviços do catálogo para validar
+coletor, ponto e categoria e pede ao serviço de fotos que confirme a
+titularidade. O repositório cria o descarte e garante, em uma única seção
+sincronizada, a exclusividade da foto e da sessão ativa do coletor.
+O cancelamento atualiza o estado somente de `WAITING_WEIGHT` para
+`CANCELLED`. A foto continua vinculada e o coletor volta a ficar disponível.

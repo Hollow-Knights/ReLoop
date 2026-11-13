@@ -18,7 +18,9 @@ public class InMemoryCollectionCatalog implements CollectionPointRepository, Ele
             new CollectionPoint(1L, "Ecoponto Centro", "Rua Exemplo, 100", -20.45, -54.62, true,
                     List.of(1L, 2L, 3L, 4L), List.of(new Device("COL-001", true))),
             new CollectionPoint(2L, "Ecoponto Bairro Norte", "Rua Demonstração, 250", -20.42, -54.61, false,
-                    List.of(1L, 4L), List.of(new Device("COL-002", false))));
+                    List.of(1L, 4L), List.of(new Device("COL-002", false))),
+            new CollectionPoint(3L, "Ecoponto Bairro Sul", "Rua Demonstração, 350", -20.49, -54.63, true,
+                    List.of(1L, 4L), List.of(new Device("COL-003", true))));
 
     private final List<ElectronicCategory> categories = List.of(
             new ElectronicCategory(1L, "Celulares", 30, 5, 40,

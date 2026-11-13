@@ -24,4 +24,8 @@ public class ElectronicCategoryService {
                         category.minWeightKg(), category.maxWeightKg()))
                 .toList();
     }
+
+    public boolean existsById(Long id) {
+        return repository.findAllCategories().stream().anyMatch(category -> category.id().equals(id));
+    }
 }

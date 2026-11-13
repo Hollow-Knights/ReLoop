@@ -60,6 +60,22 @@ A operação registra evento, transição e eventual crédito na mesma
 transação. Uma tentativa que sofre rollback pode ser reenviada com o mesmo
 `eventId`. O serviço compara pesos pelo valor decimal.
 
+### Integração do cadastro e cancelamento
+
+O adaptador de descartes precisará gravar o identificador do usuário,
+coletor, categoria e foto, além de nome do item, estado, criação, peso,
+estimativa e pontos creditados. O vínculo composto da foto com o usuário
+permite conferir a titularidade também na persistência. O `photoId`
+identifica a associação. A URL de leitura pode ser gerada a partir da
+referência de armazenamento e da configuração do ambiente.
+
+Cadastro, reserva de sessão ativa do coletor e associação exclusiva da
+foto precisam ocorrer atomicamente. O cancelamento precisa ser
+condicional ao proprietário e ao estado `WAITING_WEIGHT`, preservando a
+linha no histórico. Para substituir o repositório em memória, a equipe
+deve alinhar como o banco impedirá sessões ativas concorrentes para o
+mesmo coletor.
+
 ## Carteira, benefícios e cupons
 
 | Tabela | Campos e tipos sugeridos | Chaves e constraints |
