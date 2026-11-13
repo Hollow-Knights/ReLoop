@@ -3,12 +3,11 @@ info:
   title: ReLoop API v1
   version: 1.0.0
   description: |
-    Contrato do MVP acadêmico Ecoponto (ReLoop). As consultas do catálogo e
-    as operações de fotos e descartes implementadas estão identificadas nos
-    resumos. No perfil local `bootstrap`, elas dispensam JWT. O catálogo usa
-    dados fictícios e as operações de fotos e descartes usam um único usuário
-    demonstrativo. O contrato de autenticação Bearer vale para a futura
-    execução dessas operações nos demais perfis.
+    Contrato do MVP acadêmico Ecoponto (ReLoop). As operações implementadas
+    estão identificadas nos resumos. No perfil local `bootstrap`, o catálogo
+    usa dados fictícios e fotos e descartes usam um único usuário demonstrativo.
+    O endpoint IoT usa a credencial `X-Device-Key`. O contrato de autenticação
+    Bearer vale para a futura execução das rotas de usuário nos demais perfis.
     O Swagger UI disponibiliza os modelos para consulta. O health check está
     disponível em `/actuator/health`.
     Os campos JSON usam camelCase. Datas são emitidas em UTC no formato ISO 8601.
@@ -187,8 +186,8 @@ paths:
       summary: Listar categorias e parâmetros de pontuação (implementado no bootstrap)
       description: |
         No perfil bootstrap, a consulta funciona sem JWT e retorna os parâmetros
-        armazenados no catálogo. No fluxo futuro de descarte, o backend validará
-        o peso no intervalo inclusivo da categoria e calculará
+        armazenados no catálogo. Ao receber a pesagem, o backend valida
+        o peso no intervalo inclusivo da categoria e calcula
         `min(maxPoints, roundHalfUp(basePoints + weightKg * pointsPerKg))`.
       responses:
         '200':
@@ -399,7 +398,7 @@ paths:
     post:
       tags: [IoT]
       operationId: receiveIotEvent
-      summary: Receber evento do coletor simulado
+      summary: Receber evento do coletor simulado (implementado no bootstrap)
       description: |
         A credencial deve autorizar o `deviceId`, que deve corresponder ao coletor
         do descarte. As transições são WEIGHT_RECORDED (WAITING_WEIGHT →
@@ -410,6 +409,8 @@ paths:
         original sem novos efeitos, mesmo após outras transições. Números de
         peso equivalentes (por exemplo, 3.8 e 3.80) representam o mesmo valor.
         Reutilizar o identificador com dados diferentes gera 409.
+        Eventos rejeitados podem ser corrigidos e reenviados. No perfil
+        `bootstrap`, eventos e créditos ficam em memória até o reinício.
       security:
         - deviceKey: []
       requestBody:
@@ -426,6 +427,12 @@ paths:
                   disposalId: 42
                   eventType: WEIGHT_RECORDED
                   weightKg: 3.8
+              abertura:
+                value:
+                  eventId: evt-002
+                  deviceId: COL-001
+                  disposalId: 42
+                  eventType: DOOR_OPENED
               fechamento:
                 value:
                   eventId: evt-003

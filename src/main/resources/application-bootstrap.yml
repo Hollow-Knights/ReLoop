@@ -11,6 +11,9 @@ spring:
 reloop:
   photo:
     base-url: ${PHOTO_BASE_URL:http://localhost:${server.port:8080}}
+  iot:
+    device-id: ${IOT_DEVICE_ID:COL-001}
+    device-key: "${IOT_DEVICE_KEY:}"
 
 springdoc:
   api-docs:
