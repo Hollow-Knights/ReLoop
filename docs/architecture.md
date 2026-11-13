@@ -111,12 +111,30 @@ Para um pequeno eletrodoméstico de 3,8 kg dentro dos limites da categoria,
   o cupom e o saldo registrados no resgate original. Operações concorrentes
   devem preservar o saldo e o estoque não negativos.
 
-## Segurança no Bloco 1
+## Consultas do catálogo
+
+`CollectionPointController` e `ElectronicCategoryController` recebem as
+consultas e delegam aos serviços correspondentes. Os serviços usam
+`CollectionPointRepository` e `ElectronicCategoryRepository` para ler os
+dados, então convertem os modelos em DTOs do OpenAPI. O controller traduz
+a ausência de um ponto para HTTP 404, formatado pelo tratamento de erros
+compartilhado.
+
+No perfil `bootstrap`, `InMemoryCollectionCatalog` fornece as duas
+interfaces a partir de listas imutáveis. O futuro adaptador PostgreSQL
+implementará as mesmas interfaces com Spring Data JPA. Ele deverá fornecer
+os modelos de leitura do catálogo, incluindo as categorias aceitas e os
+coletores no detalhe de um ponto. O cálculo de pontos será implementado
+no fluxo de descarte.
+
+## Segurança
 
 A configuração HTTP é sem sessão. O health check é público e exibe apenas o
 estado agregado. No perfil `bootstrap`, o filtro também libera o Swagger UI,
-sua configuração e o YAML. Todas as demais rotas ficam bloqueadas. A
-dependência OAuth2 Resource Server prepara a futura validação de JWT. A
+sua configuração, o YAML e os três GETs do catálogo. Fora desse perfil, o
+filtro exige autenticação para as consultas do catálogo, cuja fonte de dados
+está disponível apenas no `bootstrap`. As demais rotas ficam bloqueadas.
+A dependência OAuth2 Resource Server prepara a futura validação de JWT. A
 emissão de tokens, a configuração do decodificador e a autenticação do
 dispositivo fazem parte da implementação futura. O tratamento de exceções
 MVC e os erros do filtro de segurança usam o modelo `ApiError`.

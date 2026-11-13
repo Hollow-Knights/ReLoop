@@ -25,6 +25,19 @@ referenciados.
 | `electronic_categories` | `id bigint`, `name text`, `base_points integer`, `points_per_kg integer`, `max_points integer`, `min_weight_kg numeric`, `max_weight_kg numeric` | PK `id`. Nome único. Pontos não negativos. Limites com `0 < min_weight_kg <= max_weight_kg`. |
 | `collection_point_categories` | `collection_point_id bigint`, `category_id bigint` | PK composta por `collection_point_id` e `category_id`. FKs para `collection_points.id` e `electronic_categories.id`. |
 
+### Campos consumidos pelo catálogo
+
+| Consulta | Campos usados pelo futuro adaptador PostgreSQL |
+| --- | --- |
+| Lista de pontos | `collection_points.id`, `name`, `address`, `latitude`, `longitude` e `is_active`. |
+| Detalhe do ponto | Os campos da lista, `collection_point_categories.category_id` e `collection_devices.device_id` e `is_active`, associados pelo `collection_point_id`. |
+| Lista de categorias | `electronic_categories.id`, `name`, `base_points`, `points_per_kg`, `max_points`, `min_weight_kg` e `max_weight_kg`. |
+
+O adaptador preencherá os modelos de leitura de `collection.model`, com
+`BigDecimal` para os pesos. Quando um ponto não tiver categorias aceitas
+ou coletores, o detalhe retornará arrays vazios. As interfaces de consulta
+continuarão a ser usadas pelos serviços do catálogo.
+
 ## Fotos, descartes e IoT
 
 | Tabela | Campos e tipos sugeridos | Chaves e constraints |
