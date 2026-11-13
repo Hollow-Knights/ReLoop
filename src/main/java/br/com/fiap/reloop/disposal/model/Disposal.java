@@ -27,7 +27,23 @@ public record Disposal(
         if (status != DisposalStatus.WAITING_WEIGHT) {
             throw new IllegalStateException("Somente um descarte que aguarda pesagem pode ser cancelado.");
         }
+        return withState(DisposalStatus.CANCELLED, weightKg, estimatedPoints, awardedPoints);
+    }
+
+    public Disposal recordWeight(BigDecimal weight, int points) {
+        return withState(DisposalStatus.WAITING_DEPOSIT, weight, points, 0);
+    }
+
+    public Disposal openDoor() {
+        return withState(DisposalStatus.DEPOSIT_IN_PROGRESS, weightKg, estimatedPoints, 0);
+    }
+
+    public Disposal complete() {
+        return withState(DisposalStatus.COMPLETED, weightKg, estimatedPoints, estimatedPoints);
+    }
+
+    private Disposal withState(DisposalStatus newStatus, BigDecimal weight, Integer estimate, int award) {
         return new Disposal(id, userId, deviceId, categoryId, itemName, photoId,
-                DisposalStatus.CANCELLED, weightKg, estimatedPoints, awardedPoints, createdAt);
+                newStatus, weight, estimate, award, createdAt);
     }
 }

@@ -1,8 +1,10 @@
 package br.com.fiap.reloop.collection.service;
 
 import java.util.List;
+import java.util.Optional;
 
 import br.com.fiap.reloop.collection.dto.ElectronicCategoryResponse;
+import br.com.fiap.reloop.collection.model.ElectronicCategory;
 import br.com.fiap.reloop.collection.repository.ElectronicCategoryRepository;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
@@ -26,6 +28,10 @@ public class ElectronicCategoryService {
     }
 
     public boolean existsById(Long id) {
-        return repository.findAllCategories().stream().anyMatch(category -> category.id().equals(id));
+        return findCategoryById(id).isPresent();
+    }
+
+    public Optional<ElectronicCategory> findCategoryById(Long id) {
+        return repository.findAllCategories().stream().filter(category -> category.id().equals(id)).findFirst();
     }
 }

@@ -6,17 +6,22 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.UnaryOperator;
 
 import br.com.fiap.reloop.disposal.model.Disposal;
 import br.com.fiap.reloop.disposal.model.DisposalStatus;
+import br.com.fiap.reloop.iot.model.IotEvent;
+import br.com.fiap.reloop.iot.repository.IotEventRepository;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
 @Repository
 @Profile("bootstrap")
-public class InMemoryDisposalRepository implements DisposalRepository {
+public class InMemoryDisposalRepository implements DisposalRepository, IotEventRepository {
 
     private final Map<Long, Disposal> disposals = new HashMap<>();
+    private final Map<String, ProcessedEvent> events = new HashMap<>();
+    private final Map<Long, PointCredit> creditsByDisposal = new HashMap<>();
     private long nextId = 1;
 
     @Override
@@ -51,5 +56,38 @@ public class InMemoryDisposalRepository implements DisposalRepository {
         }
         disposals.put(id, disposal.cancel());
         return true;
+    }
+
+    @Override
+    public synchronized Optional<Disposal> process(IotEvent event, UnaryOperator<Disposal> transition) {
+        ProcessedEvent previous = events.get(event.eventId());
+        if (previous != null) {
+            if (!previous.event().hasSamePayload(event)) {
+                throw new EventIdConflict();
+            }
+            return Optional.of(previous.result());
+        }
+
+        Disposal disposal = disposals.get(event.disposalId());
+        if (disposal == null || !disposal.deviceId().equals(event.deviceId())) {
+            return Optional.empty();
+        }
+
+        Disposal result = transition.apply(disposal);
+        if (result.status() == DisposalStatus.COMPLETED && result.awardedPoints() > 0) {
+            var credit = new PointCredit(result.userId(), result.awardedPoints(), Instant.now());
+            if (creditsByDisposal.putIfAbsent(result.id(), credit) != null) {
+                throw new IllegalStateException("O descarte já possui um crédito.");
+            }
+        }
+        disposals.put(result.id(), result);
+        events.put(event.eventId(), new ProcessedEvent(event, result));
+        return Optional.of(result);
+    }
+
+    private record ProcessedEvent(IotEvent event, Disposal result) {
+    }
+
+    private record PointCredit(Long userId, int points, Instant createdAt) {
     }
 }

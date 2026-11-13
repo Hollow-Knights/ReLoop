@@ -1,5 +1,6 @@
 package br.com.fiap.reloop.security;
 
+import br.com.fiap.reloop.iot.security.DeviceKeyFilter;
 import br.com.fiap.reloop.shared.web.ApiError;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -16,6 +17,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
 
@@ -43,6 +45,12 @@ public class SecurityConfiguration {
                 paths.matcher(HttpMethod.DELETE, "/api/v1/disposals/{id}"),
                 paths.matcher(HttpMethod.GET, "/api/v1/users/me/disposals"));
         var implementedRoutes = new OrRequestMatcher(catalogReads, photoRequests, disposalRequests);
+        var iotEvents = paths.matcher(HttpMethod.POST, "/api/v1/iot/events");
+        if (bootstrap) {
+            http.addFilterBefore(new DeviceKeyFilter(iotEvents, objectMapper,
+                    environment.getRequiredProperty("reloop.iot.device-id"),
+                    environment.getRequiredProperty("reloop.iot.device-key")), AuthorizationFilter.class);
+        }
 
         return http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -58,7 +66,8 @@ public class SecurityConfiguration {
                                 "/docs/openapi.yaml").permitAll();
                     }
                     if (bootstrap) {
-                        authorize.requestMatchers(implementedRoutes).permitAll();
+                        // O filtro IoT exige X-Device-Key antes que a requisição alcance o controller.
+                        authorize.requestMatchers(implementedRoutes, iotEvents).permitAll();
                     } else {
                         authorize.requestMatchers(implementedRoutes).authenticated();
                     }
