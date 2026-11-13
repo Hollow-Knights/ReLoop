@@ -34,6 +34,15 @@ public class SecurityConfiguration {
                 paths.matcher(HttpMethod.GET, "/api/v1/collection-points"),
                 paths.matcher(HttpMethod.GET, "/api/v1/collection-points/{id}"),
                 paths.matcher(HttpMethod.GET, "/api/v1/electronic-categories"));
+        var photoRequests = new OrRequestMatcher(
+                paths.matcher(HttpMethod.POST, "/api/v1/uploads"),
+                paths.matcher(HttpMethod.GET, "/api/v1/uploads/{photoId}"));
+        var disposalRequests = new OrRequestMatcher(
+                paths.matcher(HttpMethod.POST, "/api/v1/disposals"),
+                paths.matcher(HttpMethod.GET, "/api/v1/disposals/{id}"),
+                paths.matcher(HttpMethod.DELETE, "/api/v1/disposals/{id}"),
+                paths.matcher(HttpMethod.GET, "/api/v1/users/me/disposals"));
+        var implementedRoutes = new OrRequestMatcher(catalogReads, photoRequests, disposalRequests);
 
         return http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -49,9 +58,9 @@ public class SecurityConfiguration {
                                 "/docs/openapi.yaml").permitAll();
                     }
                     if (bootstrap) {
-                        authorize.requestMatchers(catalogReads).permitAll();
+                        authorize.requestMatchers(implementedRoutes).permitAll();
                     } else {
-                        authorize.requestMatchers(catalogReads).authenticated();
+                        authorize.requestMatchers(implementedRoutes).authenticated();
                     }
                     authorize.anyRequest().denyAll();
                 })
@@ -59,7 +68,7 @@ public class SecurityConfiguration {
                         .authenticationEntryPoint((request, response, exception) -> {
                             response.setStatus(HttpStatus.UNAUTHORIZED.value());
                             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-                            if (catalogReads.matches(request)) {
+                            if (implementedRoutes.matches(request)) {
                                 response.setHeader(HttpHeaders.WWW_AUTHENTICATE, "Bearer");
                             }
                             objectMapper.writeValue(response.getOutputStream(), ApiError.of(

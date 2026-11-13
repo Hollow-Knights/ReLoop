@@ -32,6 +32,12 @@ public class CollectionPointService {
         return repository.findPointById(id).map(this::toDetailResponse);
     }
 
+    public Optional<CollectionPoint> findPointByDeviceId(String deviceId) {
+        return repository.findAllPoints().stream()
+                .filter(point -> point.devices().stream().anyMatch(device -> device.deviceId().equals(deviceId)))
+                .findFirst();
+    }
+
     private CollectionPointDetailResponse toDetailResponse(CollectionPoint point) {
         List<CollectionDeviceResponse> devices = point.devices().stream()
                 .map(device -> new CollectionDeviceResponse(device.deviceId(), device.active()))
