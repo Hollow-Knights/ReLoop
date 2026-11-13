@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import br.com.fiap.reloop.user.model.User;
+import br.com.fiap.reloop.wallet.repository.WalletRepository;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
@@ -12,18 +13,25 @@ import org.springframework.stereotype.Repository;
 @Profile("bootstrap")
 public class InMemoryUserRepository implements UserRepository {
 
+    private final WalletRepository wallets;
     private final Map<Long, User> users = new HashMap<>();
     private final Map<String, Long> idsByEmail = new HashMap<>();
     private long nextId = 1L;
+
+    public InMemoryUserRepository(WalletRepository wallets) {
+        this.wallets = wallets;
+    }
 
     @Override
     public synchronized User create(String name, String normalizedEmail, String passwordHash) {
         if (idsByEmail.containsKey(normalizedEmail)) {
             throw new EmailAlreadyInUse();
         }
-        User user = new User(nextId++, name, normalizedEmail, passwordHash);
+        User user = new User(nextId, name, normalizedEmail, passwordHash);
+        wallets.open(user.id());
         users.put(user.id(), user);
         idsByEmail.put(user.email(), user.id());
+        nextId++;
         return user;
     }
 

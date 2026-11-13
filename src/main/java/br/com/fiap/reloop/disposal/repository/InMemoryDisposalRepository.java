@@ -12,6 +12,8 @@ import br.com.fiap.reloop.disposal.model.Disposal;
 import br.com.fiap.reloop.disposal.model.DisposalStatus;
 import br.com.fiap.reloop.iot.model.IotEvent;
 import br.com.fiap.reloop.iot.repository.IotEventRepository;
+import br.com.fiap.reloop.shared.persistence.InMemoryPointsLock;
+import br.com.fiap.reloop.wallet.repository.WalletRepository;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
@@ -19,10 +21,16 @@ import org.springframework.stereotype.Repository;
 @Profile("bootstrap")
 public class InMemoryDisposalRepository implements DisposalRepository, IotEventRepository {
 
+    private final InMemoryPointsLock pointsLock;
+    private final WalletRepository wallets;
     private final Map<Long, Disposal> disposals = new HashMap<>();
     private final Map<String, ProcessedEvent> events = new HashMap<>();
-    private final Map<Long, PointCredit> creditsByDisposal = new HashMap<>();
     private long nextId = 1;
+
+    public InMemoryDisposalRepository(InMemoryPointsLock pointsLock, WalletRepository wallets) {
+        this.pointsLock = pointsLock;
+        this.wallets = wallets;
+    }
 
     @Override
     public synchronized Disposal create(Long userId, String deviceId, Long categoryId, String itemName, UUID photoId) {
@@ -74,20 +82,17 @@ public class InMemoryDisposalRepository implements DisposalRepository, IotEventR
         }
 
         Disposal result = transition.apply(disposal);
-        if (result.status() == DisposalStatus.COMPLETED && result.awardedPoints() > 0) {
-            var credit = new PointCredit(result.userId(), result.awardedPoints(), Instant.now());
-            if (creditsByDisposal.putIfAbsent(result.id(), credit) != null) {
-                throw new IllegalStateException("O descarte já possui um crédito.");
+        synchronized (pointsLock) {
+            if (result.status() == DisposalStatus.COMPLETED && result.awardedPoints() > 0) {
+                wallets.creditDisposal(result.userId(), result.id(), result.awardedPoints(), result.itemName(),
+                        Instant.now());
             }
+            disposals.put(result.id(), result);
+            events.put(event.eventId(), new ProcessedEvent(event, result));
         }
-        disposals.put(result.id(), result);
-        events.put(event.eventId(), new ProcessedEvent(event, result));
         return Optional.of(result);
     }
 
     private record ProcessedEvent(IotEvent event, Disposal result) {
-    }
-
-    private record PointCredit(Long userId, int points, Instant createdAt) {
     }
 }

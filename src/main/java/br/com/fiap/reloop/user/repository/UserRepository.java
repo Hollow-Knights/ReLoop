@@ -6,6 +6,7 @@ import br.com.fiap.reloop.user.model.User;
 
 public interface UserRepository {
 
+    /** Cria o usuário e sua carteira vazia na mesma unidade de trabalho. */
     User create(String name, String normalizedEmail, String passwordHash);
 
     Optional<User> findById(Long id);

@@ -51,7 +51,12 @@ public class SecurityConfiguration {
         var profileRequests = new OrRequestMatcher(
                 paths.matcher(HttpMethod.GET, "/api/v1/users/me"),
                 paths.matcher(HttpMethod.PUT, "/api/v1/users/me"));
-        var privateRequests = new OrRequestMatcher(photoRequests, disposalRequests, profileRequests);
+        var walletAndRewardRequests = new OrRequestMatcher(
+                paths.matcher(HttpMethod.GET, "/api/v1/users/me/wallet"),
+                paths.matcher(HttpMethod.GET, "/api/v1/rewards"),
+                paths.matcher(HttpMethod.POST, "/api/v1/rewards/{id}/redeem"),
+                paths.matcher(HttpMethod.GET, "/api/v1/users/me/redemptions"));
+        var privateRequests = new OrRequestMatcher(photoRequests, disposalRequests, profileRequests, walletAndRewardRequests);
         var publicAuth = new OrRequestMatcher(
                 paths.matcher(HttpMethod.POST, "/api/v1/auth/register"),
                 paths.matcher(HttpMethod.POST, "/api/v1/auth/login"));
