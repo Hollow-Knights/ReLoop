@@ -17,7 +17,10 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         HttpStatus status = HttpStatus.resolve(statusCode.value());
         String code = status != null ? status.name() : "HTTP_" + statusCode.value();
         String message = "A requisição não pôde ser concluída.";
-        if (statusCode.is5xxServerError()) {
+        if (status == HttpStatus.NOT_FOUND) {
+            code = "RESOURCE_NOT_FOUND";
+            message = "Recurso não encontrado.";
+        } else if (statusCode.is5xxServerError()) {
             message = "Erro interno da aplicação.";
         } else if (status != null) {
             message = status.getReasonPhrase();
