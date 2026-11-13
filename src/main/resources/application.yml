@@ -1,0 +1,24 @@
+spring:
+  application:
+    name: reloop
+  jpa:
+    open-in-view: false
+  sql:
+    init:
+      mode: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
+springdoc:
+  enable-default-api-docs: false
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
