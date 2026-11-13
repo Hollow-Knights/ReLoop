@@ -110,6 +110,16 @@ com estimativa zero não gera movimentação. No resgate, o nome do benefício
 e o saldo restante são registrados no momento da emissão, permitindo
 reproduzir a resposta após alterações no catálogo ou na carteira.
 
+As interfaces `WalletRepository`, `RewardRepository` e
+`RedemptionRepository` delimitam as operações dos adaptadores. O
+adaptador de resgates deve resolver a unicidade de `(user_id, idempotency_key)`
+antes de aplicar o débito, inclusive quando duas requisições chegam juntas.
+Se a primeira operação já tiver sido confirmada, retorne o resgate salvo
+quando o benefício coincidir. Trate outro benefício como conflito. As
+alterações no saldo, no estoque e nas linhas de resgate e de movimentação
+devem ficar na mesma transação. Valide também a FK única da carteira por
+usuário e a unicidade do crédito por descarte na transação do IoT.
+
 ## Consultas e concorrência
 
 - Planeje índices para FKs usadas em consultas, incluindo coletores por

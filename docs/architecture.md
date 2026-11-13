@@ -48,10 +48,10 @@ chamar serviços de outros módulos. O contrato HTTP versionado fica no
 
 ## Fluxo de descarte
 
-1. O cidadão cadastra a conta e começa sem créditos no mecanismo em
-   memória. A futura criação da carteira persistente deve ocorrer na
-   mesma transação do cadastro. Após o login, o cliente envia o JWT nas
-   rotas protegidas.
+1. O cidadão cadastra a conta e recebe uma carteira vazia. A criação da
+   conta e da carteira deve compartilhar a mesma transação quando os
+   adaptadores PostgreSQL forem integrados. Após o login, o cliente envia
+   o JWT nas rotas protegidas.
 2. O aplicativo consulta os pontos e as categorias. Ao escanear o QR Code,
    obtém o identificador do coletor, por exemplo, `COL-001`.
 3. O aplicativo envia a foto em `POST /api/v1/uploads`. `upload` registra
@@ -103,22 +103,29 @@ Para um pequeno eletrodoméstico de 3,8 kg dentro dos limites da categoria,
   divergência gera `409`. A comparação do peso usa o valor decimal, de modo
   que `3.8` e `3.80` são equivalentes.
 - **Persistência no bootstrap.** O adaptador em memória implementa
-  `DisposalRepository` e `IotEventRepository`. A mesma seção sincronizada
-  protege o descarte, o resultado associado ao identificador do evento e o
-  crédito temporário indexado pelo ID do descarte. Ela também coordena a
-  pesagem com o cancelamento e a abertura de novas sessões. Uma falha de
-  validação ocorre antes da gravação. Cada crédito registra o usuário,
-  o valor e o instante.
-- **Fechamento do descarte.** `disposal` valida a transição e chama o serviço
-  interno de `wallet` na implementação futura da carteira, com a identidade
-  do usuário, o ID do descarte e os pontos estimados. A transação incluirá o
-  crédito, a atualização do saldo e a transição a `COMPLETED`. Se o valor
-  for zero, o descarte é concluído com zero pontos e sem lançamento.
+  `DisposalRepository` e `IotEventRepository`. O monitor de descartes
+  coordena os eventos com o cancelamento e a abertura de novas sessões.
+  Ao aplicar uma transição, o adaptador também adquire o monitor
+  compartilhado por carteira e recompensas. O evento, seu resultado e o
+  eventual crédito ficam visíveis juntos. Operações de carteira e resgate
+  usam somente o monitor compartilhado.
+- **Fechamento do descarte.** O adaptador de IoT registra o crédito por
+  `WalletRepository` com o usuário, o ID do descarte e os pontos estimados.
+  A carteira guarda um lançamento `CREDIT` por descarte. Se o valor for
+  zero, o descarte é concluído com zero pontos e sem lançamento.
 - **Resgate.** `reward` usa a `Idempotency-Key` enviada pelo cliente e
   vinculada ao usuário. O serviço atualiza estoque e carteira, registra o
   débito e emite o cupom na mesma transação. Em uma repetição idêntica, devolve
   o cupom e o saldo registrados no resgate original. Operações concorrentes
-  devem preservar o saldo e o estoque não negativos.
+  são serializadas pelo monitor compartilhado no `bootstrap`. O resgate
+  resolve a chave antes de ler saldo ou estoque. Com PostgreSQL, a operação
+  deverá usar uma transação real e as constraints de unicidade.
+
+Uma `Wallet` pertence ao usuário e resume o total ganho e o total resgatado.
+Uma `PointTransaction` registra a movimentação individual com origem no
+descarte ou no resgate. O modelo `Redemption` guarda os dados da emissão do
+cupom, incluindo o saldo imediatamente após a operação. O saldo atual
+é calculado como total ganho menos total resgatado.
 
 ## Consultas do catálogo
 
@@ -140,8 +147,9 @@ parâmetros da categoria no momento da pesagem.
 
 A configuração HTTP é sem sessão. No perfil `bootstrap`, cadastro,
 login, catálogo e documentação são públicos. O health check também é
-público. O Spring Security exige Bearer JWT nas rotas de perfil, fotos e
-descartes. O filtro de IoT exige `X-Device-Key` em sua própria rota.
+público. O Spring Security exige Bearer JWT nas rotas de perfil, fotos,
+descartes, carteira, recompensas e resgates. O filtro de IoT exige
+`X-Device-Key` em sua própria rota.
 O tratamento de exceções MVC e os erros do filtro usam o modelo `ApiError`.
 
 No cadastro, `AuthService` gera o hash PBKDF2 com salt e `UserService`

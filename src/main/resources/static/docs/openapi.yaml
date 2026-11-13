@@ -6,7 +6,8 @@ info:
     Contrato do MVP acadêmico Ecoponto (ReLoop). As operações implementadas
     estão identificadas nos resumos. No perfil local `bootstrap`, o catálogo
     usa dados fictícios. Cadastro, login e catálogo são públicos nesse perfil.
-    Perfil, fotos e descartes exigem `Authorization: Bearer <token>`.
+    Perfil, fotos, descartes, carteira, recompensas e resgates exigem
+    `Authorization: Bearer <token>`.
     O endpoint IoT usa a credencial `X-Device-Key`.
     Os usuários e seus dados são temporários. Configure `JWT_SECRET` para iniciar
     o perfil `bootstrap`. O README descreve como gerar o segredo e testar com
@@ -38,8 +39,8 @@ paths:
       summary: Cadastrar cidadão (implementado no bootstrap)
       description: |
         Cria um usuário com e-mail normalizado em minúsculas e senha armazenada
-        como hash. No bootstrap, o usuário começa sem créditos. A criação da
-        carteira persistente será integrada ao cadastro em uma entrega futura.
+        como hash. No bootstrap, o cadastro também abre uma carteira em
+        memória com saldo zero.
       security: []
       requestBody:
         required: true
@@ -493,7 +494,8 @@ paths:
     get:
       tags: [Carteira]
       operationId: getMyWallet
-      summary: Consultar saldo e movimentações
+      summary: Consultar saldo e movimentações (implementado no bootstrap)
+      description: Retorna o saldo do titular e as movimentações da mais recente para a mais antiga.
       responses:
         '200':
           description: Carteira do usuário autenticado.
@@ -510,7 +512,8 @@ paths:
     get:
       tags: [Recompensas]
       operationId: listRewards
-      summary: Listar benefícios
+      summary: Listar benefícios (implementado no bootstrap)
+      description: Exibe custo, estoque e situação de cada benefício fictício.
       responses:
         '200':
           description: Benefícios e disponibilidades.
@@ -531,14 +534,14 @@ paths:
     post:
       tags: [Recompensas]
       operationId: redeemReward
-      summary: Resgatar benefício
+      summary: Resgatar benefício (implementado no bootstrap)
       description: |
         Envie a mesma Idempotency-Key ao repetir uma tentativa de resgate. A
         chave é vinculada ao usuário autenticado. Repetir a chave para o mesmo
         benefício após o sucesso devolve o 201 original com o mesmo cupom e sem
         novo débito. Usar essa chave para outro benefício gera 409. Um novo
         resgate exige uma nova chave. Saldo, estoque, débito e cupom são
-        atualizados na mesma transação.
+        atualizados na mesma transação. Envie a requisição sem corpo.
       parameters:
         - name: Idempotency-Key
           in: header
@@ -575,7 +578,8 @@ paths:
     get:
       tags: [Recompensas]
       operationId: listMyRedemptions
-      summary: Listar cupons do usuário autenticado
+      summary: Listar cupons do usuário autenticado (implementado no bootstrap)
+      description: Retorna os resgates do titular, do mais recente para o mais antigo.
       responses:
         '200':
           description: Resgates do usuário com os dados registrados na emissão.
