@@ -6,8 +6,8 @@ item, acompanha a pesagem e o depósito simulados e usa os pontos recebidos
 para resgatar benefícios fictícios.
 
 O backend disponibiliza o health check, três consultas do catálogo, o fluxo
-de fotos e descartes, a integração IoT simulada e a autenticação JWT no
-perfil `bootstrap`. A
+de fotos e descartes, a integração IoT simulada, a autenticação JWT e o
+fluxo de carteira e recompensas no perfil `bootstrap`. A
 [especificação OpenAPI](src/main/resources/static/docs/openapi.yaml) indica
 quais operações estão implementadas e quais ainda estão planejadas.
 
@@ -66,12 +66,13 @@ A resposta esperada é `{"status":"UP"}`. Abra o [Swagger UI local](http://local
 para consultar os contratos, ou acesse o [YAML servido pela aplicação](http://localhost:8080/docs/openapi.yaml).
 Os resumos indicam quais operações estão implementadas no `bootstrap`.
 O Swagger UI fica em modo de consulta. Use os exemplos abaixo para chamar
-o catálogo e o fluxo de descartes. As rotas planejadas permanecem bloqueadas.
+o catálogo, o fluxo de descartes e o resgate de recompensas.
 
 ## Cadastrar, entrar e atualizar o perfil
 
 No perfil `bootstrap`, cadastro, login e as três consultas do catálogo são
-públicos. Perfil, fotos e descartes exigem `Authorization: Bearer <token>`.
+públicos. Perfil, fotos, descartes, carteira e recompensas exigem
+`Authorization: Bearer <token>`.
 O simulador IoT usa `X-Device-Key`.
 
 ```sh
@@ -269,15 +270,77 @@ curl -fsS -H "Authorization: Bearer $token" "$base_url/api/v1/disposals/$disposa
 
 As respostas `200` mostram `WAITING_DEPOSIT`, `DEPOSIT_IN_PROGRESS` e
 `COMPLETED`. Para um pequeno eletrodoméstico de 3,8 kg, a pesagem estima
-25 pontos e o fechamento os credita em memória. O descarte concluído
-libera o coletor. A confirmação pode ser consultada em `awardedPoints`
-no detalhe ou no histórico do descarte.
+25 pontos e o fechamento registra um crédito na carteira do titular.
+O descarte concluído libera o coletor. Consulte `awardedPoints` no
+descarte e a movimentação `CREDIT` no extrato.
 
 Reenvie o mesmo evento para obter a resposta original. O mesmo `eventId`
 com conteúdo diferente retorna `409`, assim como eventos fora da ordem.
 Peso fora da faixa inclusiva da categoria retorna `422`. Envie
 `weightKg` somente em eventos de pesagem. O reinício apaga os eventos,
-os descartes e os créditos temporários.
+os descartes, as carteiras, os resgates e os créditos temporários.
+
+## Consultar carteira e resgatar benefícios
+
+Use o token do login e consulte a carteira, o catálogo e os cupons da conta.
+Cada cadastro abre uma carteira vazia com saldo zero.
+
+```sh
+curl -fsS "$base_url/api/v1/users/me/wallet" -H "Authorization: Bearer $token"
+curl -fsS "$base_url/api/v1/rewards" -H "Authorization: Bearer $token"
+curl -fsS "$base_url/api/v1/users/me/redemptions" -H "Authorization: Bearer $token"
+```
+
+Após completar o exemplo de descarte da air fryer, a carteira retorna
+`200` com 25 pontos disponíveis.
+
+```json
+{
+  "availablePoints": 25,
+  "totalEarned": 25,
+  "totalRedeemed": 0,
+  "transactions": [
+    {"id": 1, "type": "CREDIT", "points": 25, "description": "Descarte de Air fryer", "createdAt": "2026-11-12T20:15:00Z"}
+  ]
+}
+```
+
+Resgate o benefício de frete grátis, de ID `10` e custo de 20 pontos.
+Gere uma chave para a tentativa. O POST usa apenas o ID na URL e os cabeçalhos.
+
+```sh
+redemption_key=$(uuidgen)
+curl -fsS -X POST "$base_url/api/v1/rewards/10/redeem" \
+  -H "Authorization: Bearer $token" -H "Idempotency-Key: $redemption_key"
+```
+
+O resgate retorna `201`, gera um cupom fictício e deixa 5 pontos disponíveis
+neste exemplo.
+
+```json
+{
+  "redemptionId": 1,
+  "rewardId": 10,
+  "rewardName": "Cupom de frete grátis",
+  "pointsSpent": 20,
+  "remainingPoints": 5,
+  "couponCode": "RELOOP-1-43e2db87-d32f-4520-a8ac-12e455b139f6",
+  "redeemedAt": "2026-11-12T20:30:00Z"
+}
+```
+
+O histórico mostra o cupom e o saldo registrado no momento do resgate.
+O extrato passa a mostrar um `DEBIT` de 20 pontos seguido pelo `CREDIT`
+de 25. As duas listas ordenam os registros do mais recente para o mais antigo.
+
+Ao repetir um resgate confirmado, envie a mesma `Idempotency-Key` com o
+mesmo benefício para obter o `201` original, mesmo se o saldo ou o estoque
+mudar. Cada resgate novo usa uma chave diferente. Reusar a chave para outro
+benefício, tentar resgatar com saldo insuficiente ou escolher um benefício
+inativo ou esgotado retorna `409`. O catálogo contém quatro exemplos
+fictícios, incluindo um benefício inativo e outro com estoque inicial de uma
+unidade. A carteira, o catálogo e os resgates ficam em memória no
+`bootstrap`; o reinício restaura o catálogo inicial.
 
 ## Integrar com PostgreSQL
 
@@ -323,14 +386,18 @@ da foto poderão ser persistidos via `PhotoStorage` e o arquivo poderá usar
 armazenamento durável. `JwtCurrentUserProvider` já extrai a identidade
 autenticada do contexto do Spring Security. O adaptador PostgreSQL
 implementará `UserRepository` com unicidade de e-mail e persistência do
-hash. O cadastro em memória começa sem créditos no mecanismo de IoT. A
-criação da carteira persistente com saldo zero será integrada ao cadastro
-quando a carteira estiver disponível.
+hash. A criação da carteira com saldo zero deve ocorrer na mesma transação
+do cadastro.
 
 Para IoT, a implementação PostgreSQL de `IotEventRepository` precisa
 guardar o evento e seu resultado, atualizar o descarte e gravar o crédito
 na mesma transação. O contrato de persistência descreve os dados para o
 alinhamento com Hiago. A chave demonstrativa é exclusiva do `bootstrap`.
+Para carteira e recompensas, os adaptadores de `WalletRepository`,
+`RewardRepository` e `RedemptionRepository` usarão as tabelas
+`wallets`, `point_transactions`, `rewards` e `redemptions`.
+O resgate deverá gravar baixa de estoque, débito e cupom na mesma
+transação. Consulte as [constraints propostas](docs/database/schema-contract.md#carteira-benefícios-e-cupons).
 
 ## Estrutura
 
