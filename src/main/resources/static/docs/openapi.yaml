@@ -1,0 +1,987 @@
+openapi: 3.0.3
+info:
+  title: ReLoop API v1 — contratos planejados
+  version: 1.0.0
+  description: |
+    Contrato do MVP acadêmico Ecoponto (ReLoop). Os 17 endpoints de negócio abaixo
+    estão planejados. Nesta entrega, os serviços operacionais são o health check em
+    `/actuator/health` e a documentação no perfil `bootstrap`.
+    O Swagger UI disponibiliza os modelos para consulta.
+    Os campos JSON usam camelCase. Datas são emitidas em UTC no formato ISO 8601.
+servers:
+  - url: /
+    description: Origem da aplicação
+security:
+  - bearerAuth: []
+tags:
+  - name: Autenticação
+  - name: Usuários
+  - name: Pontos de coleta
+  - name: Categorias
+  - name: Fotos
+  - name: Descartes
+  - name: IoT
+  - name: Carteira
+  - name: Recompensas
+
+paths:
+  /api/v1/auth/register:
+    post:
+      tags: [Autenticação]
+      operationId: register
+      summary: Cadastrar cidadão
+      description: Cria o usuário e a carteira com saldo zero na mesma transação.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Usuário cadastrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: E-mail já cadastrado (EMAIL_ALREADY_IN_USE).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/auth/login:
+    post:
+      tags: [Autenticação]
+      operationId: login
+      summary: Autenticar cidadão
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: JWT de acesso emitido.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Credenciais inválidas (INVALID_CREDENTIALS).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/users/me:
+    get:
+      tags: [Usuários]
+      operationId: getMyProfile
+      summary: Consultar o próprio perfil
+      responses:
+        '200':
+          description: Perfil do usuário autenticado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Usuários]
+      operationId: updateMyProfile
+      summary: Atualizar o próprio perfil
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: Perfil atualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: E-mail em uso por outro usuário (EMAIL_ALREADY_IN_USE).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/collection-points:
+    get:
+      tags: [Pontos de coleta]
+      operationId: listCollectionPoints
+      summary: Listar pontos de coleta
+      responses:
+        '200':
+          description: Locais de coleta.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CollectionPointResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/collection-points/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    get:
+      tags: [Pontos de coleta]
+      operationId: getCollectionPoint
+      summary: Consultar ponto de coleta, categorias aceitas e coletores
+      responses:
+        '200':
+          description: Detalhes do local.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CollectionPointDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/electronic-categories:
+    get:
+      tags: [Categorias]
+      operationId: listElectronicCategories
+      summary: Listar categorias e parâmetros de pontuação
+      description: |
+        O backend valida o peso dentro do intervalo inclusivo da categoria e calcula
+        `min(maxPoints, roundHalfUp(basePoints + weightKg * pointsPerKg))` usando
+        aritmética decimal. Um pequeno eletrodoméstico de 3,8 kg gera 25 pontos
+        com base 10, 4 pontos por kg e máximo 35.
+      responses:
+        '200':
+          description: Categorias disponíveis.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ElectronicCategoryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/uploads:
+    post:
+      tags: [Fotos]
+      operationId: uploadPhoto
+      summary: Enviar foto do eletrônico
+      description: |
+        Recebe um arquivo JPEG ou PNG de 1 byte a 10 MiB. A foto é vinculada ao usuário
+        autenticado e poderá ser associada a um descarte dele.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UploadRequest'
+            encoding:
+              file:
+                contentType: 'image/jpeg, image/png'
+      responses:
+        '201':
+          description: Foto recebida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          description: Arquivo maior que o limite (FILE_TOO_LARGE).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '415':
+          description: Tipo de mídia incompatível (UNSUPPORTED_MEDIA_TYPE).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/disposals:
+    post:
+      tags: [Descartes]
+      operationId: startDisposal
+      summary: Iniciar descarte
+      description: |
+        O coletor e seu ponto de coleta devem estar ativos, e o ponto deve aceitar
+        a categoria. A foto deve pertencer ao cidadão e estar livre para associação.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDisposalRequest'
+      responses:
+        '201':
+          description: Descarte em WAITING_WEIGHT, com peso e estimativa nulos e zero pontos creditados.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisposalResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Coletor ou categoria inexistente, ou foto inexistente ou de outro usuário (RESOURCE_NOT_FOUND).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Foto já associada (PHOTO_ALREADY_LINKED) ou coletor ou ponto de coleta inativo (DEVICE_UNAVAILABLE).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: O ponto de coleta não aceita a categoria (CATEGORY_NOT_ACCEPTED).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/disposals/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    get:
+      tags: [Descartes]
+      operationId: getDisposal
+      summary: Consultar descarte do usuário autenticado
+      responses:
+        '200':
+          description: Estado atual do descarte do usuário.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisposalResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Descartes]
+      operationId: cancelDisposal
+      summary: Cancelar descarte que aguarda pesagem
+      description: O registro do usuário passa de WAITING_WEIGHT para CANCELLED e permanece no histórico.
+      responses:
+        '204':
+          description: Descarte cancelado. Sem corpo na resposta.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/InvalidDisposalState'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/users/me/disposals:
+    get:
+      tags: [Descartes]
+      operationId: listMyDisposals
+      summary: Listar histórico de descartes do usuário autenticado
+      responses:
+        '200':
+          description: Descartes do usuário, inclusive os cancelados.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DisposalHistoryItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/iot/events:
+    post:
+      tags: [IoT]
+      operationId: receiveIotEvent
+      summary: Receber evento do coletor simulado
+      description: |
+        A credencial deve autorizar o `deviceId`, que deve corresponder ao coletor
+        do descarte. As transições são WEIGHT_RECORDED (WAITING_WEIGHT →
+        WAITING_DEPOSIT), DOOR_OPENED (WAITING_DEPOSIT → DEPOSIT_IN_PROGRESS) e
+        DOOR_CLOSED (DEPOSIT_IN_PROGRESS → COMPLETED). O fechamento e o crédito
+        de pontos ocorrem na mesma transação.
+        Um `eventId` já processado com os mesmos valores retorna a resposta 200
+        original sem novos efeitos, mesmo após outras transições. Números de
+        peso equivalentes (por exemplo, 3.8 e 3.80) representam o mesmo valor.
+        Reutilizar o identificador com dados diferentes gera 409.
+      security:
+        - deviceKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IotEventRequest'
+            examples:
+              pesagem:
+                value:
+                  eventId: evt-001
+                  deviceId: COL-001
+                  disposalId: 42
+                  eventType: WEIGHT_RECORDED
+                  weightKg: 3.8
+              fechamento:
+                value:
+                  eventId: evt-003
+                  deviceId: COL-001
+                  disposalId: 42
+                  eventType: DOOR_CLOSED
+      responses:
+        '200':
+          description: Evento aceito ou repetição idêntica já processada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IotEventResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Credencial de dispositivo ausente ou inválida (INVALID_DEVICE_KEY).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Credencial sem autorização para o coletor informado (DEVICE_FORBIDDEN).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Descarte indisponível para o coletor (RESOURCE_NOT_FOUND).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Estado incompatível (INVALID_DISPOSAL_STATE) ou evento divergente (EVENT_ID_CONFLICT).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Peso fora dos limites da categoria (WEIGHT_OUT_OF_RANGE).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/users/me/wallet:
+    get:
+      tags: [Carteira]
+      operationId: getMyWallet
+      summary: Consultar saldo e movimentações
+      responses:
+        '200':
+          description: Carteira do usuário autenticado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/rewards:
+    get:
+      tags: [Recompensas]
+      operationId: listRewards
+      summary: Listar benefícios
+      responses:
+        '200':
+          description: Benefícios e disponibilidades.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RewardResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/rewards/{id}/redeem:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    post:
+      tags: [Recompensas]
+      operationId: redeemReward
+      summary: Resgatar benefício
+      description: |
+        Envie a mesma Idempotency-Key ao repetir uma tentativa de resgate. A
+        chave é vinculada ao usuário autenticado. Repetir a chave para o mesmo
+        benefício após o sucesso devolve o 201 original com o mesmo cupom e sem
+        novo débito. Usar essa chave para outro benefício gera 409. Um novo
+        resgate exige uma nova chave. Saldo, estoque, débito e cupom são
+        atualizados na mesma transação.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Identificador da tentativa gerado pelo cliente. Um UUID é uma opção.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: '^[A-Za-z0-9._-]+$'
+      responses:
+        '201':
+          description: Resgate confirmado, inclusive na repetição de uma tentativa concluída.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RedemptionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Saldo insuficiente (INSUFFICIENT_POINTS), benefício inativo ou esgotado (REWARD_UNAVAILABLE) ou chave reutilizada com outro benefício (IDEMPOTENCY_KEY_CONFLICT).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/users/me/redemptions:
+    get:
+      tags: [Recompensas]
+      operationId: listMyRedemptions
+      summary: Listar cupons do usuário autenticado
+      responses:
+        '200':
+          description: Resgates do usuário com os dados registrados na emissão.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RedemptionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Envie Authorization com o valor Bearer seguido do token.
+    deviceKey:
+      type: apiKey
+      in: header
+      name: X-Device-Key
+      description: Credencial de teste do coletor simulado.
+
+  parameters:
+    ResourceId:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/EntityId'
+
+  responses:
+    BadRequest:
+      description: Dados de entrada ausentes, inválidos ou malformados (BAD_REQUEST).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Unauthorized:
+      description: JWT ausente, inválido ou expirado (AUTHENTICATION_REQUIRED ou INVALID_TOKEN).
+      headers:
+        WWW-Authenticate:
+          description: Desafio HTTP para o esquema Bearer.
+          schema:
+            type: string
+          example: Bearer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    NotFound:
+      description: Recurso inexistente ou fora do escopo do usuário (RESOURCE_NOT_FOUND).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    InvalidDisposalState:
+      description: O estado atual impede a operação (INVALID_DISPOSAL_STATE).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    InternalError:
+      description: Erro interno (INTERNAL_SERVER_ERROR).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    EntityId:
+      type: integer
+      format: int64
+      minimum: 1
+      example: 42
+    DeviceId:
+      type: string
+      minLength: 1
+      maxLength: 64
+      example: COL-001
+    PhotoId:
+      type: string
+      format: uuid
+      example: 0bcc2e7b-3d69-4af4-bfd9-5ed1f62985a5
+    PhotoUrl:
+      type: string
+      format: uri
+      description: URL autorizada para visualizar a foto. Pode ter validade limitada.
+      example: https://media.example.com/photos/0bcc2e7b-3d69-4af4-bfd9-5ed1f62985a5
+    Points:
+      type: integer
+      format: int32
+      minimum: 0
+      example: 25
+    WeightKg:
+      type: number
+      minimum: 0
+      exclusiveMinimum: true
+      description: Peso decimal positivo em kg, representado por BigDecimal no backend.
+      example: 3.8
+    NullableWeightKg:
+      type: number
+      nullable: true
+      minimum: 0
+      exclusiveMinimum: true
+      description: Peso decimal positivo em kg ou null enquanto aguarda pesagem.
+      example: 3.8
+    NullablePoints:
+      type: integer
+      format: int32
+      minimum: 0
+      nullable: true
+      description: Pontos estimados ou null enquanto aguarda pesagem.
+      example: 25
+    UtcTimestamp:
+      type: string
+      format: date-time
+      example: '2026-11-12T22:30:00Z'
+    UserName:
+      type: string
+      minLength: 1
+      maxLength: 120
+      example: Ana Silva
+    Email:
+      type: string
+      format: email
+      maxLength: 254
+      example: ana@example.com
+    DisposalStatus:
+      type: string
+      enum: [WAITING_WEIGHT, WAITING_DEPOSIT, DEPOSIT_IN_PROGRESS, COMPLETED, CANCELLED]
+    IotEventType:
+      type: string
+      enum: [WEIGHT_RECORDED, DOOR_OPENED, DOOR_CLOSED]
+    EventId:
+      type: string
+      minLength: 1
+      maxLength: 128
+      description: Identificador opaco e único por evento em todo o sistema.
+      example: evt-001
+    TransactionType:
+      type: string
+      enum: [CREDIT, DEBIT]
+    ApiError:
+      type: object
+      required: [status, code, message, timestamp]
+      properties:
+        status:
+          type: integer
+          format: int32
+          minimum: 400
+          maximum: 599
+          example: 409
+        code:
+          type: string
+          example: INVALID_DISPOSAL_STATE
+        message:
+          type: string
+          example: O descarte precisa estar aguardando pesagem.
+        timestamp:
+          $ref: '#/components/schemas/UtcTimestamp'
+
+    RegisterRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name:
+          $ref: '#/components/schemas/UserName'
+        email:
+          $ref: '#/components/schemas/Email'
+        password:
+          type: string
+          format: password
+          minLength: 8
+          writeOnly: true
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          $ref: '#/components/schemas/Email'
+        password:
+          type: string
+          format: password
+          minLength: 1
+          writeOnly: true
+    UpdateProfileRequest:
+      type: object
+      required: [name, email]
+      properties:
+        name:
+          $ref: '#/components/schemas/UserName'
+        email:
+          $ref: '#/components/schemas/Email'
+    ProfileResponse:
+      type: object
+      required: [id, name, email]
+      properties:
+        id:
+          $ref: '#/components/schemas/EntityId'
+        name:
+          $ref: '#/components/schemas/UserName'
+        email:
+          $ref: '#/components/schemas/Email'
+    TokenResponse:
+      type: object
+      required: [accessToken, tokenType, expiresIn]
+      properties:
+        accessToken:
+          type: string
+          description: JWT de acesso.
+        tokenType:
+          type: string
+          enum: [Bearer]
+        expiresIn:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Tempo de validade em segundos.
+          example: 3600
+
+    CollectionPointResponse:
+      type: object
+      required: [id, name, address, latitude, longitude, isActive]
+      properties:
+        id:
+          $ref: '#/components/schemas/EntityId'
+        name:
+          type: string
+        address:
+          type: string
+        latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+        isActive:
+          type: boolean
+    CollectionPointDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/CollectionPointResponse'
+        - type: object
+          required: [acceptedCategoryIds, devices]
+          properties:
+            acceptedCategoryIds:
+              type: array
+              uniqueItems: true
+              items:
+                $ref: '#/components/schemas/EntityId'
+            devices:
+              type: array
+              items:
+                $ref: '#/components/schemas/CollectionDeviceResponse'
+    CollectionDeviceResponse:
+      type: object
+      required: [deviceId, isActive]
+      properties:
+        deviceId:
+          $ref: '#/components/schemas/DeviceId'
+        isActive:
+          type: boolean
+    ElectronicCategoryResponse:
+      type: object
+      required: [id, name, basePoints, pointsPerKg, maxPoints, minWeightKg, maxWeightKg]
+      properties:
+        id:
+          $ref: '#/components/schemas/EntityId'
+        name:
+          type: string
+        basePoints:
+          $ref: '#/components/schemas/Points'
+        pointsPerKg:
+          $ref: '#/components/schemas/Points'
+        maxPoints:
+          $ref: '#/components/schemas/Points'
+        minWeightKg:
+          $ref: '#/components/schemas/WeightKg'
+        maxWeightKg:
+          $ref: '#/components/schemas/WeightKg'
+
+    UploadRequest:
+      type: object
+      required: [file]
+      properties:
+        file:
+          type: string
+          format: binary
+    UploadResponse:
+      type: object
+      required: [photoId, photoUrl]
+      properties:
+        photoId:
+          $ref: '#/components/schemas/PhotoId'
+        photoUrl:
+          $ref: '#/components/schemas/PhotoUrl'
+    CreateDisposalRequest:
+      type: object
+      additionalProperties: false
+      required: [deviceId, categoryId, itemName, photoId]
+      properties:
+        deviceId:
+          $ref: '#/components/schemas/DeviceId'
+        categoryId:
+          $ref: '#/components/schemas/EntityId'
+        itemName:
+          type: string
+          minLength: 1
+          maxLength: 120
+          example: Air fryer
+        photoId:
+          $ref: '#/components/schemas/PhotoId'
+    DisposalResponse:
+      allOf:
+        - $ref: '#/components/schemas/DisposalHistoryItem'
+        - type: object
+          required: [deviceId, photoId, photoUrl, estimatedPoints]
+          properties:
+            deviceId:
+              $ref: '#/components/schemas/DeviceId'
+            photoId:
+              $ref: '#/components/schemas/PhotoId'
+            photoUrl:
+              $ref: '#/components/schemas/PhotoUrl'
+            estimatedPoints:
+              $ref: '#/components/schemas/NullablePoints'
+    DisposalHistoryItem:
+      type: object
+      required: [id, itemName, categoryId, status, weightKg, awardedPoints, createdAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/EntityId'
+        itemName:
+          type: string
+          example: Air fryer
+        categoryId:
+          $ref: '#/components/schemas/EntityId'
+        status:
+          $ref: '#/components/schemas/DisposalStatus'
+        weightKg:
+          $ref: '#/components/schemas/NullableWeightKg'
+        awardedPoints:
+          $ref: '#/components/schemas/Points'
+        createdAt:
+          $ref: '#/components/schemas/UtcTimestamp'
+
+    IotEventRequest:
+      type: object
+      additionalProperties: false
+      required: [eventId, deviceId, disposalId, eventType]
+      properties:
+        eventId:
+          $ref: '#/components/schemas/EventId'
+        deviceId:
+          $ref: '#/components/schemas/DeviceId'
+        disposalId:
+          $ref: '#/components/schemas/EntityId'
+        eventType:
+          $ref: '#/components/schemas/IotEventType'
+        weightKg:
+          $ref: '#/components/schemas/WeightKg'
+      oneOf:
+        - required: [weightKg]
+          properties:
+            eventType:
+              enum: [WEIGHT_RECORDED]
+        - not:
+            required: [weightKg]
+          properties:
+            eventType:
+              enum: [DOOR_OPENED, DOOR_CLOSED]
+    IotEventResponse:
+      type: object
+      required: [eventId, disposalId, status, weightKg, estimatedPoints, awardedPoints]
+      properties:
+        eventId:
+          $ref: '#/components/schemas/EventId'
+        disposalId:
+          $ref: '#/components/schemas/EntityId'
+        status:
+          $ref: '#/components/schemas/DisposalStatus'
+        weightKg:
+          $ref: '#/components/schemas/NullableWeightKg'
+        estimatedPoints:
+          $ref: '#/components/schemas/NullablePoints'
+        awardedPoints:
+          $ref: '#/components/schemas/Points'
+
+    WalletResponse:
+      type: object
+      required: [availablePoints, totalEarned, totalRedeemed, transactions]
+      properties:
+        availablePoints:
+          $ref: '#/components/schemas/Points'
+        totalEarned:
+          $ref: '#/components/schemas/Points'
+        totalRedeemed:
+          $ref: '#/components/schemas/Points'
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PointTransactionResponse'
+    PointTransactionResponse:
+      type: object
+      required: [id, type, points, description, createdAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/EntityId'
+        type:
+          $ref: '#/components/schemas/TransactionType'
+        points:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Magnitude positiva. O tipo indica a direção da movimentação.
+          example: 25
+        description:
+          type: string
+        createdAt:
+          $ref: '#/components/schemas/UtcTimestamp'
+    RewardResponse:
+      type: object
+      required: [id, name, description, partnerName, costPoints, availableQuantity, active]
+      properties:
+        id:
+          $ref: '#/components/schemas/EntityId'
+        name:
+          type: string
+        description:
+          type: string
+        partnerName:
+          type: string
+        costPoints:
+          type: integer
+          format: int32
+          minimum: 1
+        availableQuantity:
+          type: integer
+          format: int32
+          minimum: 0
+        active:
+          type: boolean
+    RedemptionResponse:
+      type: object
+      required: [redemptionId, rewardId, rewardName, pointsSpent, remainingPoints, couponCode, redeemedAt]
+      properties:
+        redemptionId:
+          $ref: '#/components/schemas/EntityId'
+        rewardId:
+          $ref: '#/components/schemas/EntityId'
+        rewardName:
+          type: string
+        pointsSpent:
+          type: integer
+          format: int32
+          minimum: 1
+        remainingPoints:
+          allOf:
+            - $ref: '#/components/schemas/Points'
+          description: Saldo imediatamente após o resgate, preservado no histórico.
+        couponCode:
+          type: string
+        redeemedAt:
+          $ref: '#/components/schemas/UtcTimestamp'
