@@ -60,6 +60,15 @@ A operação registra evento, transição e eventual crédito na mesma
 transação. Uma tentativa que sofre rollback pode ser reenviada com o mesmo
 `eventId`. O serviço compara pesos pelo valor decimal.
 
+O adaptador de `IotEventRepository` deve aplicar a transição sobre a versão
+atual do descarte e guardar o resultado original para futuras repetições.
+A mesma transação precisa atualizar o descarte, registrar o evento e,
+no fechamento com pontos positivos, incluir o crédito único por descarte.
+A unicidade do evento, a reserva do coletor e a transição condicional
+devem ser alinhadas com Hiago para preservar o comportamento sob
+concorrência. No `bootstrap`, o repositório em memória protege as
+operações de evento e cancelamento pela mesma sincronização.
+
 ### Integração do cadastro e cancelamento
 
 O adaptador de descartes precisará gravar o identificador do usuário,

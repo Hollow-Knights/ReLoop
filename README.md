@@ -5,8 +5,8 @@ incentiva o descarte de eletrônicos em pontos de coleta. O cidadão registra o
 item, acompanha a pesagem e o depósito simulados e usa os pontos recebidos
 para resgatar benefícios fictícios.
 
-O backend disponibiliza o health check, três consultas do catálogo e o fluxo
-de fotos e descartes no perfil `bootstrap`. A
+O backend disponibiliza o health check, três consultas do catálogo, o fluxo
+de fotos e descartes e a integração IoT simulada no perfil `bootstrap`. A
 [especificação OpenAPI](src/main/resources/static/docs/openapi.yaml) indica
 quais operações estão implementadas e quais ainda estão planejadas.
 
@@ -181,6 +181,55 @@ diretório. Após uma interrupção forçada, localize a pasta da execução
 encerrada no diretório temporário do sistema e remova-a manualmente. Cada
 reinício começa com histórico vazio e novas associações de fotos.
 
+## Simular a pesagem e os eventos da porta
+
+O perfil `bootstrap` habilita `POST /api/v1/iot/events`. Configure uma
+credencial local e o identificador do coletor antes de iniciar a aplicação.
+O coletor padrão é `COL-001`. Sem `IOT_DEVICE_KEY`, as chamadas IoT retornam
+`401`. Use a mesma chave para executar os exemplos em outro terminal.
+
+```sh
+export IOT_DEVICE_ID=COL-001
+export IOT_DEVICE_KEY='chave-local-de-demonstracao'
+./mvnw spring-boot:run -Dspring-boot.run.profiles=bootstrap
+```
+
+Crie um descarte em `COL-001` com a categoria `3`, conforme a seção
+anterior. Substitua `1` pelo ID retornado e envie os três eventos na ordem.
+Gere um identificador novo para cada evento de uma nova sessão.
+
+```sh
+disposal_id=1
+event_prefix=$(uuidgen)
+base_url=http://localhost:8080
+
+curl -fsS "$base_url/api/v1/iot/events" \
+  -H "X-Device-Key: $IOT_DEVICE_KEY" -H 'Content-Type: application/json' \
+  -d "{\"eventId\":\"${event_prefix}-peso\",\"deviceId\":\"COL-001\",\"disposalId\":$disposal_id,\"eventType\":\"WEIGHT_RECORDED\",\"weightKg\":3.8}"
+
+curl -fsS "$base_url/api/v1/iot/events" \
+  -H "X-Device-Key: $IOT_DEVICE_KEY" -H 'Content-Type: application/json' \
+  -d "{\"eventId\":\"${event_prefix}-abertura\",\"deviceId\":\"COL-001\",\"disposalId\":$disposal_id,\"eventType\":\"DOOR_OPENED\"}"
+
+curl -fsS "$base_url/api/v1/iot/events" \
+  -H "X-Device-Key: $IOT_DEVICE_KEY" -H 'Content-Type: application/json' \
+  -d "{\"eventId\":\"${event_prefix}-fechamento\",\"deviceId\":\"COL-001\",\"disposalId\":$disposal_id,\"eventType\":\"DOOR_CLOSED\"}"
+
+curl -fsS "$base_url/api/v1/disposals/$disposal_id"
+```
+
+As respostas `200` mostram `WAITING_DEPOSIT`, `DEPOSIT_IN_PROGRESS` e
+`COMPLETED`. Para um pequeno eletrodoméstico de 3,8 kg, a pesagem estima
+25 pontos e o fechamento os credita em memória. O descarte concluído
+libera o coletor. A confirmação pode ser consultada em `awardedPoints`
+no detalhe ou no histórico do descarte.
+
+Reenvie o mesmo evento para obter a resposta original. O mesmo `eventId`
+com conteúdo diferente retorna `409`, assim como eventos fora da ordem.
+Peso fora da faixa inclusiva da categoria retorna `422`. Envie
+`weightKg` somente em eventos de pesagem. O reinício apaga os eventos,
+os descartes e os créditos temporários.
+
 ## Integrar com PostgreSQL
 
 Um profile é um conjunto de configurações ativado na inicialização. Escolha
@@ -226,6 +275,11 @@ armazenamento durável. A integração JWT fornecerá uma implementação de
 `CurrentUserProvider` que extrai a identidade autenticada do contexto do
 Spring Security. Os controllers e services do fluxo poderão ser ativados
 nos perfis que tiverem essas implementações.
+
+Para IoT, a implementação PostgreSQL de `IotEventRepository` precisa
+guardar o evento e seu resultado, atualizar o descarte e gravar o crédito
+na mesma transação. O contrato de persistência descreve os dados para o
+alinhamento com Hiago. A chave demonstrativa é exclusiva do `bootstrap`.
 
 ## Estrutura
 

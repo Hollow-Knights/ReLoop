@@ -94,17 +94,25 @@ Para um pequeno eletrodoméstico de 3,8 kg dentro dos limites da categoria,
 `10 + 3,8 × 4 = 25,2`. O arredondamento resulta em 25 pontos.
 
 - **Eventos IoT.** `iot` autentica a credencial e confirma que ela autoriza o
-  coletor. Depois encaminha o evento a `disposal`. Na repetição de um
+  coletor. O filtro exige `X-Device-Key` antes da leitura do JSON, e o
+  controller confere se a chave autoriza o `deviceId` do corpo.
+  `IotEventService` verifica a transição do descarte e usa
+  `PointCalculationService` na pesagem. Na repetição de um
   `eventId` com dados equivalentes, retorna a resposta original. Uma
-  divergência gera `409`. A identificação global do evento e a gravação do
-  resultado fazem parte da transação que processa o evento.
+  divergência gera `409`. A comparação do peso usa o valor decimal, de modo
+  que `3.8` e `3.80` são equivalentes.
+- **Persistência no bootstrap.** O adaptador em memória implementa
+  `DisposalRepository` e `IotEventRepository`. A mesma seção sincronizada
+  protege o descarte, o resultado associado ao identificador do evento e o
+  crédito temporário indexado pelo ID do descarte. Ela também coordena a
+  pesagem com o cancelamento e a abertura de novas sessões. Uma falha de
+  validação ocorre antes da gravação. Cada crédito registra o usuário,
+  o valor e o instante.
 - **Fechamento do descarte.** `disposal` valida a transição e chama o serviço
-  interno de `wallet` com a identidade do usuário, o ID do descarte e os
-  pontos estimados. Na mesma transação, a carteira registra o crédito e
-  atualiza o saldo, e o descarte passa a `COMPLETED`. Se o valor for zero, o
-  descarte é concluído com zero pontos e sem lançamento. O fechamento e o
-  cancelamento precisam competir pelas mesmas garantias de concorrência do
-  descarte.
+  interno de `wallet` na implementação futura da carteira, com a identidade
+  do usuário, o ID do descarte e os pontos estimados. A transação incluirá o
+  crédito, a atualização do saldo e a transição a `COMPLETED`. Se o valor
+  for zero, o descarte é concluído com zero pontos e sem lançamento.
 - **Resgate.** `reward` usa a `Idempotency-Key` enviada pelo cliente e
   vinculada ao usuário. O serviço atualiza estoque e carteira, registra o
   débito e emite o cupom na mesma transação. Em uma repetição idêntica, devolve
@@ -124,8 +132,8 @@ No perfil `bootstrap`, `InMemoryCollectionCatalog` fornece as duas
 interfaces a partir de listas imutáveis. O futuro adaptador PostgreSQL
 implementará as mesmas interfaces com Spring Data JPA. Ele deverá fornecer
 os modelos de leitura do catálogo, incluindo as categorias aceitas e os
-coletores no detalhe de um ponto. O cálculo de pontos será implementado
-no fluxo de descarte.
+coletores no detalhe de um ponto. O fluxo de descarte consulta os
+parâmetros da categoria no momento da pesagem.
 
 ## Segurança
 
