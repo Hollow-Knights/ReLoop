@@ -13,9 +13,13 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
+import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
+import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
@@ -44,12 +48,35 @@ public class SecurityConfiguration {
                 paths.matcher(HttpMethod.GET, "/api/v1/disposals/{id}"),
                 paths.matcher(HttpMethod.DELETE, "/api/v1/disposals/{id}"),
                 paths.matcher(HttpMethod.GET, "/api/v1/users/me/disposals"));
-        var implementedRoutes = new OrRequestMatcher(catalogReads, photoRequests, disposalRequests);
+        var profileRequests = new OrRequestMatcher(
+                paths.matcher(HttpMethod.GET, "/api/v1/users/me"),
+                paths.matcher(HttpMethod.PUT, "/api/v1/users/me"));
+        var privateRequests = new OrRequestMatcher(photoRequests, disposalRequests, profileRequests);
+        var publicAuth = new OrRequestMatcher(
+                paths.matcher(HttpMethod.POST, "/api/v1/auth/register"),
+                paths.matcher(HttpMethod.POST, "/api/v1/auth/login"));
         var iotEvents = paths.matcher(HttpMethod.POST, "/api/v1/iot/events");
+        AuthenticationEntryPoint unauthorized = (request, response, failure) -> {
+            boolean invalidToken = failure instanceof OAuth2AuthenticationException;
+            response.setStatus(HttpStatus.UNAUTHORIZED.value());
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            if (privateRequests.matches(request) || catalogReads.matches(request)) {
+                response.setHeader(HttpHeaders.WWW_AUTHENTICATE,
+                        invalidToken ? "Bearer error=\"invalid_token\"" : "Bearer");
+            }
+            objectMapper.writeValue(response.getOutputStream(), ApiError.of(HttpStatus.UNAUTHORIZED,
+                    invalidToken ? "INVALID_TOKEN" : "AUTHENTICATION_REQUIRED",
+                    invalidToken ? "Token de acesso inválido ou expirado." : "Autenticação necessária."));
+        };
         if (bootstrap) {
             http.addFilterBefore(new DeviceKeyFilter(iotEvents, objectMapper,
                     environment.getRequiredProperty("reloop.iot.device-id"),
                     environment.getRequiredProperty("reloop.iot.device-key")), AuthorizationFilter.class);
+            var bearerTokens = new DefaultBearerTokenResolver();
+            http.oauth2ResourceServer(resourceServer -> resourceServer
+                    .bearerTokenResolver(request -> privateRequests.matches(request) ? bearerTokens.resolve(request) : null)
+                    .authenticationEntryPoint(unauthorized)
+                    .jwt(Customizer.withDefaults()));
         }
 
         return http
@@ -67,22 +94,15 @@ public class SecurityConfiguration {
                     }
                     if (bootstrap) {
                         // O filtro IoT exige X-Device-Key antes que a requisição alcance o controller.
-                        authorize.requestMatchers(implementedRoutes, iotEvents).permitAll();
+                        authorize.requestMatchers(catalogReads, publicAuth, iotEvents).permitAll();
                     } else {
-                        authorize.requestMatchers(implementedRoutes).authenticated();
+                        authorize.requestMatchers(catalogReads).authenticated();
                     }
+                    authorize.requestMatchers(privateRequests).authenticated();
                     authorize.anyRequest().denyAll();
                 })
                 .exceptionHandling(errors -> errors
-                        .authenticationEntryPoint((request, response, exception) -> {
-                            response.setStatus(HttpStatus.UNAUTHORIZED.value());
-                            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-                            if (implementedRoutes.matches(request)) {
-                                response.setHeader(HttpHeaders.WWW_AUTHENTICATE, "Bearer");
-                            }
-                            objectMapper.writeValue(response.getOutputStream(), ApiError.of(
-                                    HttpStatus.UNAUTHORIZED, "AUTHENTICATION_REQUIRED", "Autenticação necessária."));
-                        })
+                        .authenticationEntryPoint(unauthorized)
                         .accessDeniedHandler((request, response, exception) -> {
                             response.setStatus(HttpStatus.FORBIDDEN.value());
                             response.setContentType(MediaType.APPLICATION_JSON_VALUE);

@@ -6,7 +6,8 @@ item, acompanha a pesagem e o depósito simulados e usa os pontos recebidos
 para resgatar benefícios fictícios.
 
 O backend disponibiliza o health check, três consultas do catálogo, o fluxo
-de fotos e descartes e a integração IoT simulada no perfil `bootstrap`. A
+de fotos e descartes, a integração IoT simulada e a autenticação JWT no
+perfil `bootstrap`. A
 [especificação OpenAPI](src/main/resources/static/docs/openapi.yaml) indica
 quais operações estão implementadas e quais ainda estão planejadas.
 
@@ -37,7 +38,7 @@ fixado no repositório, com verificação SHA-256.
 | Java 21 e Spring Boot 3.5.16 | Inicialização, autoconfiguração e servidor Tomcat embutido. |
 | Spring Web MVC e Jackson | Tratamento de requisições HTTP e serialização JSON. |
 | Spring Data JPA, Hibernate e driver PostgreSQL | Acesso futuro ao banco relacional. |
-| Spring Security e OAuth2 Resource Server | Controle de acesso na base atual e suporte à futura validação de JWT. |
+| Spring Security e OAuth2 Resource Server | Hash de senha, emissão e validação de JWT e controle de acesso. |
 | Jakarta Bean Validation | Validação declarativa nos DTOs quando as rotas forem implementadas. |
 | springdoc OpenAPI 2.10.0 | Swagger UI apontado para o contrato YAML versionado. |
 | Spring Boot Actuator | Health check operacional. |
@@ -45,9 +46,12 @@ fixado no repositório, com verificação SHA-256.
 
 ## Executar sem banco
 
-Execute a compilação e a inicialização na raiz do repositório.
+Execute na raiz do repositório. O `bootstrap` exige `JWT_SECRET` com pelo
+menos 32 bytes aleatórios codificados em Base64. Gere um segredo local com
+OpenSSL e mantenha o valor fora do Git.
 
 ```sh
+export JWT_SECRET="$(openssl rand -base64 32)"
 ./mvnw clean verify
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=bootstrap
 ```
@@ -64,12 +68,55 @@ Os resumos indicam quais operações estão implementadas no `bootstrap`.
 O Swagger UI fica em modo de consulta. Use os exemplos abaixo para chamar
 o catálogo e o fluxo de descartes. As rotas planejadas permanecem bloqueadas.
 
+## Cadastrar, entrar e atualizar o perfil
+
+No perfil `bootstrap`, cadastro, login e as três consultas do catálogo são
+públicos. Perfil, fotos e descartes exigem `Authorization: Bearer <token>`.
+O simulador IoT usa `X-Device-Key`.
+
+```sh
+base_url=http://localhost:8080
+curl -fsS "$base_url/api/v1/auth/register" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"João Pedro","email":"joao@example.com","password":"Senha123!"}'
+curl -fsS "$base_url/api/v1/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"joao@example.com","password":"Senha123!"}'
+
+# Copie accessToken da resposta de login.
+token='token de João'
+curl -fsS "$base_url/api/v1/users/me" -H "Authorization: Bearer $token"
+curl -fsS -X PUT "$base_url/api/v1/users/me" \
+  -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+  -d '{"name":"João Pedro Souza","email":"joaopedro@example.com"}'
+```
+
+O cadastro retorna `201`, e-mail em minúsculas e ID gerado no servidor.
+E-mail em uso retorna `409 EMAIL_ALREADY_IN_USE`. A senha tem de 8 a
+256 caracteres no cadastro e é armazenada como hash PBKDF2 com salt.
+O login retorna `401 INVALID_CREDENTIALS` se o e-mail ou a senha não
+conferir. Em caso de sucesso, devolve `accessToken`, `tokenType: Bearer` e
+`expiresIn: 3600`. O token HS256 tem os claims `sub` (ID do usuário),
+`iat` (emissão), `exp` (expiração) e `iss` (emissor desta execução).
+O mesmo token continua válido depois de atualizar o e-mail. Use o novo
+e-mail no próximo login. Tokens ausentes, inválidos ou expirados em rotas
+privadas retornam `401` com o código correspondente no corpo.
+
+Para testar duas contas, repita o cadastro e o login com outro e-mail,
+guarde o segundo token e crie um descarte com o token de João seguindo a
+próxima seção. Com o segundo token, o detalhe do descarte, o cancelamento
+e a leitura da foto retornam `404`. Uma tentativa de cadastrar um descarte
+com o `photoId` de João também retorna `404`, desde que o coletor e a
+categoria informados sejam válidos. Compare os históricos com cada token.
+O reinício apaga as contas em memória e invalida os tokens da execução
+anterior.
+
 ## Consultar o catálogo
 
 No perfil `bootstrap`, as três consultas aceitam chamadas sem JWT e retornam
 dados fictícios. Fora desse perfil, o filtro exige autenticação para o
-catálogo. A disponibilização do catálogo nesses ambientes depende do
-adaptador PostgreSQL e da integração JWT.
+catálogo. A disponibilização nesses ambientes depende do adaptador
+PostgreSQL e da configuração de segurança correspondente.
 
 ```sh
 curl -fsS http://localhost:8080/api/v1/collection-points
@@ -132,7 +179,7 @@ Um ID positivo inexistente retorna `404`. IDs inválidos, como `0` ou
 ## Enviar fotos e gerenciar descartes
 
 Execute a aplicação com o perfil `bootstrap`, conforme a seção anterior.
-O perfil usa um único usuário demonstrativo para todas as requisições.
+Use o token obtido no login para enviar fotos e gerenciar seus descartes.
 
 | Operação | Resultado |
 | --- | --- |
@@ -148,20 +195,22 @@ valida o formato e tenta decodificar a imagem. A rota auxiliar
 proprietário.
 
 ```sh
-curl -fsS -F 'file=@/caminho/para/foto.png' http://localhost:8080/api/v1/uploads
+curl -fsS -H "Authorization: Bearer $token" \
+  -F 'file=@/caminho/para/foto.png' http://localhost:8080/api/v1/uploads
 # Copie os valores photoId e photoUrl da resposta.
 photo_id='UUID retornado no upload'
 photo_url='URI absoluta retornada no upload'
-curl -fsS "$photo_url" -o /tmp/reloop-foto.png
+curl -fsS -H "Authorization: Bearer $token" "$photo_url" -o /tmp/reloop-foto.png
 
 curl -fsS -X POST http://localhost:8080/api/v1/disposals \
+  -H "Authorization: Bearer $token" \
   -H 'Content-Type: application/json' \
   -d "{\"deviceId\":\"COL-001\",\"categoryId\":3,\"itemName\":\"Air fryer\",\"photoId\":\"$photo_id\"}"
 
 # Substitua 1 pelo id retornado pelo cadastro.
-curl -fsS http://localhost:8080/api/v1/disposals/1
-curl -i -X DELETE http://localhost:8080/api/v1/disposals/1
-curl -fsS http://localhost:8080/api/v1/users/me/disposals
+curl -fsS -H "Authorization: Bearer $token" http://localhost:8080/api/v1/disposals/1
+curl -i -X DELETE -H "Authorization: Bearer $token" http://localhost:8080/api/v1/disposals/1
+curl -fsS -H "Authorization: Bearer $token" http://localhost:8080/api/v1/users/me/disposals
 ```
 
 O descarte começa com `weightKg` e `estimatedPoints` nulos e
@@ -215,7 +264,7 @@ curl -fsS "$base_url/api/v1/iot/events" \
   -H "X-Device-Key: $IOT_DEVICE_KEY" -H 'Content-Type: application/json' \
   -d "{\"eventId\":\"${event_prefix}-fechamento\",\"deviceId\":\"COL-001\",\"disposalId\":$disposal_id,\"eventType\":\"DOOR_CLOSED\"}"
 
-curl -fsS "$base_url/api/v1/disposals/$disposal_id"
+curl -fsS -H "Authorization: Bearer $token" "$base_url/api/v1/disposals/$disposal_id"
 ```
 
 As respostas `200` mostram `WAITING_DEPOSIT`, `DEPOSIT_IN_PROGRESS` e
@@ -271,10 +320,12 @@ identifica os dados necessários para essa substituição.
 Para descartes, o adaptador PostgreSQL implementará `DisposalRepository`,
 mantendo a reserva do coletor e da foto atômica com o cadastro. Os metadados
 da foto poderão ser persistidos via `PhotoStorage` e o arquivo poderá usar
-armazenamento durável. A integração JWT fornecerá uma implementação de
-`CurrentUserProvider` que extrai a identidade autenticada do contexto do
-Spring Security. Os controllers e services do fluxo poderão ser ativados
-nos perfis que tiverem essas implementações.
+armazenamento durável. `JwtCurrentUserProvider` já extrai a identidade
+autenticada do contexto do Spring Security. O adaptador PostgreSQL
+implementará `UserRepository` com unicidade de e-mail e persistência do
+hash. O cadastro em memória começa sem créditos no mecanismo de IoT. A
+criação da carteira persistente com saldo zero será integrada ao cadastro
+quando a carteira estiver disponível.
 
 Para IoT, a implementação PostgreSQL de `IotEventRepository` precisa
 guardar o evento e seu resultado, atualizar o descarte e gravar o crédito

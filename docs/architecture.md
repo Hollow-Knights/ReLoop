@@ -24,7 +24,7 @@ Boot para escrever erros JSON.
 | `wallet` | Saldo, créditos, débitos e extrato. |
 | `reward` | Catálogo, estoque, resgates e cupons. |
 | `upload` | Recepção de fotos e verificação de titularidade. |
-| `security` | Filtros HTTP e integração futura com JWT e a credencial do dispositivo. |
+| `security` | Emissão e validação de JWT, identidade do usuário e controle de acesso HTTP. |
 | `shared.web` | Modelo de erro HTTP e tratamento de exceções MVC. |
 
 ## Camadas
@@ -48,8 +48,9 @@ chamar serviços de outros módulos. O contrato HTTP versionado fica no
 
 ## Fluxo de descarte
 
-1. O cidadão cadastra a conta. `auth` coordena a criação do usuário e da
-   carteira zerada na mesma transação. Após o login, o cliente envia o JWT nas
+1. O cidadão cadastra a conta e começa sem créditos no mecanismo em
+   memória. A futura criação da carteira persistente deve ocorrer na
+   mesma transação do cadastro. Após o login, o cliente envia o JWT nas
    rotas protegidas.
 2. O aplicativo consulta os pontos e as categorias. Ao escanear o QR Code,
    obtém o identificador do coletor, por exemplo, `COL-001`.
@@ -137,16 +138,25 @@ parâmetros da categoria no momento da pesagem.
 
 ## Segurança
 
-A configuração HTTP é sem sessão. O health check é público e exibe apenas o
-estado agregado. No perfil `bootstrap`, o filtro também libera o Swagger UI,
-sua configuração, o YAML e as combinações de método e rota implementadas
-para catálogo, fotos e descartes. O perfil usa `BootstrapCurrentUserProvider`
-para representar um usuário de demonstração. Os serviços verificam a
-titularidade das fotos e dos descartes pela identidade obtida do provider.
-Fora do `bootstrap`, o filtro exige autenticação para essas operações. A
-implementação futura de `CurrentUserProvider` extrairá a identidade do JWT
-validado pelo Spring Security. O tratamento de exceções MVC e os erros do
-filtro usam o modelo `ApiError`.
+A configuração HTTP é sem sessão. No perfil `bootstrap`, cadastro,
+login, catálogo e documentação são públicos. O health check também é
+público. O Spring Security exige Bearer JWT nas rotas de perfil, fotos e
+descartes. O filtro de IoT exige `X-Device-Key` em sua própria rota.
+O tratamento de exceções MVC e os erros do filtro usam o modelo `ApiError`.
+
+No cadastro, `AuthService` gera o hash PBKDF2 com salt e `UserService`
+normaliza o e-mail. O repositório garante a unicidade durante cadastro e
+atualização. No login, `AuthService` verifica a senha e `JwtService` emite
+um token HS256 de uma hora. O emissor é gerado por instância para invalidar
+tokens antigos mesmo se o processo reiniciar com o mesmo segredo e
+reutilizar os IDs numéricos.
+
+Em uma rota privada, o Spring Security autentica a requisição validando
+assinatura, emissor e validade do token. `JwtCurrentUserProvider` lê
+o ID do claim `sub` no contexto autenticado. A autorização de cada recurso
+ocorre nos serviços de fotos e descartes, que verificam a titularidade
+com esse ID. Recursos de outro usuário são tratados como indisponíveis
+e retornam `404`.
 
 ## Cadastro e cancelamento no bootstrap
 
