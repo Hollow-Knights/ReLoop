@@ -5,9 +5,12 @@ info:
   description: |
     Contrato do MVP acadêmico Ecoponto (ReLoop). As operações implementadas
     estão identificadas nos resumos. No perfil local `bootstrap`, o catálogo
-    usa dados fictícios e fotos e descartes usam um único usuário demonstrativo.
-    O endpoint IoT usa a credencial `X-Device-Key`. O contrato de autenticação
-    Bearer vale para a futura execução das rotas de usuário nos demais perfis.
+    usa dados fictícios. Cadastro, login e catálogo são públicos nesse perfil.
+    Perfil, fotos e descartes exigem `Authorization: Bearer <token>`.
+    O endpoint IoT usa a credencial `X-Device-Key`.
+    Os usuários e seus dados são temporários. Configure `JWT_SECRET` para iniciar
+    o perfil `bootstrap`. O README descreve como gerar o segredo e testar com
+    dois usuários.
     O Swagger UI disponibiliza os modelos para consulta. O health check está
     disponível em `/actuator/health`.
     Os campos JSON usam camelCase. Datas são emitidas em UTC no formato ISO 8601.
@@ -32,8 +35,11 @@ paths:
     post:
       tags: [Autenticação]
       operationId: register
-      summary: Cadastrar cidadão
-      description: Cria o usuário e a carteira com saldo zero na mesma transação.
+      summary: Cadastrar cidadão (implementado no bootstrap)
+      description: |
+        Cria um usuário com e-mail normalizado em minúsculas e senha armazenada
+        como hash. No bootstrap, o usuário começa sem créditos. A criação da
+        carteira persistente será integrada ao cadastro em uma entrega futura.
       security: []
       requestBody:
         required: true
@@ -63,7 +69,8 @@ paths:
     post:
       tags: [Autenticação]
       operationId: login
-      summary: Autenticar cidadão
+      summary: Autenticar cidadão (implementado no bootstrap)
+      description: Valida o e-mail e a senha e emite um token de acesso válido por 3600 segundos.
       security: []
       requestBody:
         required: true
@@ -93,7 +100,7 @@ paths:
     get:
       tags: [Usuários]
       operationId: getMyProfile
-      summary: Consultar o próprio perfil
+      summary: Consultar o próprio perfil (implementado no bootstrap)
       responses:
         '200':
           description: Perfil do usuário autenticado.
@@ -108,7 +115,8 @@ paths:
     put:
       tags: [Usuários]
       operationId: updateMyProfile
-      summary: Atualizar o próprio perfil
+      summary: Atualizar o próprio perfil (implementado no bootstrap)
+      description: Atualiza o nome e o e-mail do titular. O token atual identifica a mesma conta após a alteração.
       requestBody:
         required: true
         content:
@@ -588,7 +596,10 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Envie Authorization com o valor Bearer seguido do token.
+      description: |
+        Envie `Authorization: Bearer <token>`. O JWT é assinado com HS256 e
+        contém `sub` (ID imutável do usuário como string), `iat` (emissão),
+        `exp` (expiração) e `iss` (emissor da instância bootstrap).
     deviceKey:
       type: apiKey
       in: header
@@ -746,6 +757,7 @@ components:
           type: string
           format: password
           minLength: 8
+          maxLength: 256
           writeOnly: true
     LoginRequest:
       type: object
@@ -757,9 +769,11 @@ components:
           type: string
           format: password
           minLength: 1
+          maxLength: 256
           writeOnly: true
     UpdateProfileRequest:
       type: object
+      additionalProperties: false
       required: [name, email]
       properties:
         name:

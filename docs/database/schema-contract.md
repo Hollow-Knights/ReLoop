@@ -25,6 +25,16 @@ referenciados.
 | `electronic_categories` | `id bigint`, `name text`, `base_points integer`, `points_per_kg integer`, `max_points integer`, `min_weight_kg numeric`, `max_weight_kg numeric` | PK `id`. Nome único. Pontos não negativos. Limites com `0 < min_weight_kg <= max_weight_kg`. |
 | `collection_point_categories` | `collection_point_id bigint`, `category_id bigint` | PK composta por `collection_point_id` e `category_id`. FKs para `collection_points.id` e `electronic_categories.id`. |
 
+### Integração de autenticação
+
+O adaptador de `UserRepository` deverá gravar o e-mail normalizado em
+minúsculas, aplicar a unicidade no banco durante cadastro e atualização
+e traduzir o conflito para `EMAIL_ALREADY_IN_USE`. O `id` é imutável e
+identifica a conta no claim `sub`. `password_hash` guarda a saída
+PBKDF2 com salt gerada pelo Spring Security, e a atualização de perfil
+grava apenas nome e e-mail. A criação de uma carteira zerada deverá
+ocorrer na mesma transação do cadastro quando a carteira for integrada.
+
 ### Campos consumidos pelo catálogo
 
 | Consulta | Campos usados pelo futuro adaptador PostgreSQL |
