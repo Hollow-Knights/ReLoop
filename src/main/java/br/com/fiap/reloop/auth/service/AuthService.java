@@ -32,7 +32,7 @@ public class AuthService {
     }
 
     public UserResponse register(RegisterUserRequest request) {
-        return users.register(request.name(), request.email(), passwords.encode(request.password()));
+        return users.register(request.name(), request.email(), passwords.encode(request.password()), request.document());
     }
 
     public LoginResponse login(LoginRequest request) {

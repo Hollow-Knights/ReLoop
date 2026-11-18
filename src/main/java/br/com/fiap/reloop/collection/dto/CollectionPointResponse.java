@@ -8,5 +8,6 @@ public record CollectionPointResponse(
         String address,
         double latitude,
         double longitude,
-        @JsonProperty("isActive") boolean active) {
+        @JsonProperty("isActive") boolean active,
+        double distanceFromUserLocation) {
 }

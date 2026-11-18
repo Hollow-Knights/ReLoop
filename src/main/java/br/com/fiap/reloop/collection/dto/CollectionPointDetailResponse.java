@@ -12,5 +12,6 @@ public record CollectionPointDetailResponse(
         double longitude,
         @JsonProperty("isActive") boolean active,
         List<Long> acceptedCategoryIds,
-        List<CollectionDeviceResponse> devices) {
+        List<CollectionDeviceResponse> devices,
+        double distanceFromUserLocation) {
 }

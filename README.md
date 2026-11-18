@@ -7,9 +7,9 @@ para resgatar benefícios fictícios.
 
 O backend disponibiliza o health check, três consultas do catálogo, o fluxo
 de fotos e descartes, a integração IoT simulada, a autenticação JWT e o
-fluxo de carteira e recompensas no perfil `bootstrap`. A
-[especificação OpenAPI](src/main/resources/static/docs/openapi.yaml) indica
-quais operações estão implementadas e quais ainda estão planejadas.
+fluxo de carteira e recompensas nos perfis `bootstrap` e `postgres`. A
+[especificação OpenAPI](src/main/resources/static/docs/openapi.yaml) define
+os contratos HTTP implementados nos dois perfis.
 
 ## Pré-requisitos
 
@@ -40,7 +40,7 @@ fixado no repositório, com verificação SHA-256.
 | Spring Web MVC e Jackson | Tratamento de requisições HTTP e serialização JSON. |
 | Spring Data JPA, Hibernate e driver PostgreSQL | Persistência e transações no perfil postgres. |
 | Spring Security e OAuth2 Resource Server | Hash de senha, emissão e validação de JWT e controle de acesso. |
-| Jakarta Bean Validation | Validação declarativa nos DTOs quando as rotas forem implementadas. |
+| Jakarta Bean Validation | Validação declarativa dos DTOs e parâmetros das requisições. |
 | springdoc OpenAPI 2.10.0 | Swagger UI apontado para o contrato YAML versionado. |
 | Spring Boot Actuator | Health check operacional. |
 | Spring Boot Test, Spring Security Test e Testcontainers | Testes HTTP, segurança e integração com PostgreSQL real. |
@@ -53,6 +53,8 @@ OpenSSL e mantenha o valor fora do Git.
 
 ```sh
 export JWT_SECRET="$(openssl rand -base64 32)"
+export IOT_DEVICE_ID=COL-001
+export IOT_DEVICE_KEY='chave-local-de-demonstracao'
 ./mvnw clean verify
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=bootstrap
 ```
@@ -71,30 +73,38 @@ o catálogo, o fluxo de descartes e o resgate de recompensas.
 
 ## Cadastrar, entrar e atualizar o perfil
 
-No perfil `bootstrap`, cadastro, login e as três consultas do catálogo são
+Nos perfis `bootstrap` e `postgres`, cadastro, login e as três consultas do catálogo são
 públicos. Perfil, fotos, descartes, carteira e recompensas exigem
 `Authorization: Bearer <token>`.
 O simulador IoT usa `X-Device-Key`.
+Novos cadastros exigem `document` com CPF válido, com ou sem máscara. Ele é
+normalizado para 11 dígitos, único por conta e não é retornado no perfil/JWT.
+O CPF dos exemplos é gerado para demonstração, sem origem em dados de pessoas.
+O aplicativo usa `GET /api/v1/user` e `PUT /api/v1/user` para consultar e atualizar
+exclusivamente o titular do JWT, sem enviar ID de usuário. `GET/PUT /api/v1/users/me`
+permanecem disponíveis como aliases de compatibilidade, com os mesmos corpos e respostas.
 
 ```sh
 base_url=http://localhost:8080
 curl -fsS "$base_url/api/v1/auth/register" \
   -H 'Content-Type: application/json' \
-  -d '{"name":"João Pedro","email":"joao@example.com","password":"Senha123!"}'
+  -d '{"name":"João Pedro","email":"joao@example.com","password":"Senha123!","document":"70000000159"}'
 curl -fsS "$base_url/api/v1/auth/login" \
   -H 'Content-Type: application/json' \
   -d '{"email":"joao@example.com","password":"Senha123!"}'
 
 # Copie accessToken da resposta de login.
 token='token de João'
-curl -fsS "$base_url/api/v1/users/me" -H "Authorization: Bearer $token"
-curl -fsS -X PUT "$base_url/api/v1/users/me" \
+curl -fsS "$base_url/api/v1/user" -H "Authorization: Bearer $token"
+curl -fsS -X PUT "$base_url/api/v1/user" \
   -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
   -d '{"name":"João Pedro Souza","email":"joaopedro@example.com"}'
 ```
 
 O cadastro retorna `201`, e-mail em minúsculas e ID gerado no servidor.
-E-mail em uso retorna `409 EMAIL_ALREADY_IN_USE`. A senha tem de 8 a
+E-mail em uso retorna `409 EMAIL_ALREADY_IN_USE`. CPF ausente ou inválido retorna
+`400 BAD_REQUEST`; CPF já cadastrado retorna `409 DOCUMENT_ALREADY_IN_USE`,
+com a mensagem `CPF já cadastrado.`, sem expor o documento. A senha tem de 8 a
 256 caracteres no cadastro e é armazenada como hash PBKDF2 com salt.
 O login retorna `401 INVALID_CREDENTIALS` se o e-mail ou a senha não
 conferir. Em caso de sucesso, devolve `accessToken`, `tokenType: Bearer` e
@@ -104,7 +114,8 @@ O mesmo token continua válido depois de atualizar o e-mail. Use o novo
 e-mail no próximo login. Tokens ausentes, inválidos ou expirados em rotas
 privadas retornam `401` com o código correspondente no corpo.
 
-Para testar duas contas, repita o cadastro e o login com outro e-mail,
+Para testar duas contas, repita o cadastro e o login com outro e-mail e outro CPF
+sintético válido (por exemplo, `70000000230`),
 guarde o segundo token e crie um descarte com o token de João seguindo a
 próxima seção. Com o segundo token, o detalhe do descarte, o cancelamento
 e a leitura da foto retornam `404`. Uma tentativa de cadastrar um descarte
@@ -128,13 +139,17 @@ curl -i http://localhost:8080/api/v1/collection-points/999
 ```
 
 A lista de pontos responde `200` com um array, inclusive `[]` quando estiver
-vazia. A resposta de demonstração inclui, por exemplo:
+vazia. Os exemplos JSON abaixo usam o catálogo do perfil `bootstrap`.
+`distanceFromUserLocation` é um número em quilômetros, simulado e estável pelo
+ID do ecoponto, igual na lista e no detalhe em ambos os perfis. Não utiliza GPS
+nem representa distância real ou trajeto por ruas.
+A resposta de demonstração inclui, por exemplo:
 
 ```json
 [
-  {"id": 1, "name": "Ecoponto Centro", "address": "Rua Exemplo, 100", "latitude": -20.45, "longitude": -54.62, "isActive": true},
-  {"id": 2, "name": "Ecoponto Bairro Norte", "address": "Rua Demonstração, 250", "latitude": -20.42, "longitude": -54.61, "isActive": false},
-  {"id": 3, "name": "Ecoponto Bairro Sul", "address": "Rua Demonstração, 350", "latitude": -20.49, "longitude": -54.63, "isActive": true}
+  {"id": 1, "name": "Ecoponto Centro", "address": "Rua Exemplo, 100", "latitude": -20.45, "longitude": -54.62, "isActive": true, "distanceFromUserLocation": 1.2},
+  {"id": 2, "name": "Ecoponto Bairro Norte", "address": "Rua Demonstração, 250", "latitude": -20.42, "longitude": -54.61, "isActive": false, "distanceFromUserLocation": 3.5},
+  {"id": 3, "name": "Ecoponto Bairro Sul", "address": "Rua Demonstração, 350", "latitude": -20.49, "longitude": -54.63, "isActive": true, "distanceFromUserLocation": 5.0}
 ]
 ```
 
@@ -149,6 +164,7 @@ aceitas e os coletores do local.
   "latitude": -20.45,
   "longitude": -54.62,
   "isActive": true,
+  "distanceFromUserLocation": 1.2,
   "acceptedCategoryIds": [1, 2, 3, 4],
   "devices": [{"deviceId": "COL-001", "isActive": true}]
 }
@@ -183,15 +199,50 @@ Um ID positivo inexistente retorna `404`. IDs inválidos, como `0` ou
 Execute a aplicação com o perfil `bootstrap`, conforme a seção anterior.
 Use o token obtido no login para enviar fotos e gerenciar seus descartes.
 
+O fluxo principal do aplicativo envia o formulário e a imagem em uma única requisição:
+
+```sh
+curl -fsS http://localhost:8080/api/v1/disposals \
+  -H "Authorization: Bearer $token" \
+  -F 'deviceId=COL-001' \
+  -F 'categoryId=1' \
+  -F 'itemName=Celular' \
+  -F 'file=@/caminho/item.png;type=image/png'
+```
+
+O curl define `multipart/form-data` e seu boundary. Todos os quatro campos são
+obrigatórios. São aceitos JPEG/PNG reais de até 10 MiB, validados pelo conteúdo.
+A resposta é `201` com o mesmo `DisposalResponse`, incluindo `photoId` e `photoUrl`.
+A foto pertence ao titular do JWT; parâmetros extras não escolhem o proprietário
+nem substituem o `photoId` gerado pelo servidor. O fluxo JSON com `photoId` e o
+endpoint separado de upload continuam disponíveis, conforme os exemplos abaixo.
+Os exemplos multipart e JSON são alternativas: use apenas um deles para iniciar
+a sessão que seguirá para a pesagem. Cada coletor aceita um descarte ativo por vez.
+
+No postgres, upload e descarte participam de uma única transação. O callback
+existente apaga o arquivo somente em rollback confirmado; em `STATUS_UNKNOWN`,
+preserva o arquivo e registra a necessidade de reconciliação. No bootstrap,
+a operação mantém o bloqueio do repositório em memória até terminar, desfaz
+inserções novas se falhar e compensa apenas as fotos criadas naquele escopo.
+Inclusive falhas ao fechar o stream depois de salvá-lo acionam essa compensação.
+Formulários são serializados nesse perfil de demonstração.
+
+Filesystem e PostgreSQL não têm commit distribuído: uma queda abrupta pode deixar
+arquivo pendente de reconciliação, e uma falha física ao remover arquivos exige
+intervenção. Não existe limpeza automática para resultados transacionais
+incertos, que poderia excluir uma fotografia confirmada.
+
+
 | Operação | Resultado |
 | --- | --- |
 | `POST /api/v1/uploads` | `201` com `photoId` e `photoUrl`. |
-| `POST /api/v1/disposals` | `201` com o descarte em `WAITING_WEIGHT`. |
+| `POST /api/v1/disposals` | Aceita multipart com `file` ou JSON com `photoId`; retorna `201` com o descarte em `WAITING_WEIGHT`. |
 | `GET /api/v1/disposals/{id}` | `200` com o estado atual do descarte. |
 | `DELETE /api/v1/disposals/{id}` | `204` ao cancelar um descarte que aguarda pesagem. |
 | `GET /api/v1/users/me/disposals` | `200` com o histórico, do mais recente ao mais antigo, incluindo cancelados. |
 
-Envie um JPEG ou PNG de até 10 MiB como a parte multipart `file`. O backend
+Para o fluxo de compatibilidade, envie primeiro um JPEG ou PNG de até 10 MiB
+como a parte multipart `file` em `POST /api/v1/uploads`. O backend
 valida o formato e tenta decodificar a imagem. A rota auxiliar
 `GET /api/v1/uploads/{photoId}` entrega a foto quando o usuário atual é o
 proprietário.
@@ -207,12 +258,15 @@ curl -fsS -H "Authorization: Bearer $token" "$photo_url" -o /tmp/reloop-foto.png
 curl -fsS -X POST http://localhost:8080/api/v1/disposals \
   -H "Authorization: Bearer $token" \
   -H 'Content-Type: application/json' \
-  -d "{\"deviceId\":\"COL-001\",\"categoryId\":3,\"itemName\":\"Air fryer\",\"photoId\":\"$photo_id\"}"
+  -d "{\"deviceId\":\"COL-001\",\"categoryId\":1,\"itemName\":\"Celular\",\"photoId\":\"$photo_id\"}"
 
-# Substitua 1 pelo id retornado pelo cadastro.
-curl -fsS -H "Authorization: Bearer $token" http://localhost:8080/api/v1/disposals/1
-curl -i -X DELETE -H "Authorization: Bearer $token" http://localhost:8080/api/v1/disposals/1
-curl -fsS -H "Authorization: Bearer $token" http://localhost:8080/api/v1/users/me/disposals
+# Após qualquer um dos dois formatos, copie o id retornado pelo POST.
+disposal_id='ID retornado pelo POST'
+curl -fsS -H "Authorization: Bearer $token" "$base_url/api/v1/disposals/$disposal_id"
+curl -fsS -H "Authorization: Bearer $token" "$base_url/api/v1/users/me/disposals"
+
+# Opcional: cancele apenas se não for seguir para a simulação IoT abaixo.
+# curl -i -X DELETE -H "Authorization: Bearer $token" "$base_url/api/v1/disposals/$disposal_id"
 ```
 
 O descarte começa com `weightKg` e `estimatedPoints` nulos e
@@ -234,29 +288,31 @@ reinício começa com histórico vazio e novas associações de fotos.
 
 ## Simular a pesagem e os eventos da porta
 
-O perfil `bootstrap` habilita `POST /api/v1/iot/events`. Configure uma
-credencial local e o identificador do coletor antes de iniciar a aplicação.
-O coletor padrão é `COL-001`. Sem `IOT_DEVICE_KEY`, as chamadas IoT retornam
-`401`. Use a mesma chave para executar os exemplos em outro terminal.
+O perfil `bootstrap` habilita `POST /api/v1/iot/events`. O roteiro de inicialização
+já configura a credencial de demonstração e o coletor `COL-001`. No terminal das
+requisições, exporte os mesmos valores. Se tiver escolhido outra chave, use o
+valor configurado no backend. Sem `IOT_DEVICE_KEY`, as chamadas IoT retornam `401`.
+Mantenha o backend em execução desde o cadastro até o resgate: reiniciar o
+bootstrap apaga o descarte em memória e invalida o token.
 
 ```sh
 export IOT_DEVICE_ID=COL-001
 export IOT_DEVICE_KEY='chave-local-de-demonstracao'
-./mvnw spring-boot:run -Dspring-boot.run.profiles=bootstrap
 ```
 
-Crie um descarte em `COL-001` com a categoria `3`, conforme a seção
-anterior. Substitua `1` pelo ID retornado e envie os três eventos na ordem.
-Gere um identificador novo para cada evento de uma nova sessão.
+Use o descarte de celular em `COL-001`, categoria `1`, criado por um dos formatos
+da seção anterior, ainda em `WAITING_WEIGHT`. Mantenha `disposal_id` com o ID
+retornado pelo POST e envie os três eventos na ordem. O peso de 0,500 kg é válido
+para essa categoria nos dois perfis. Gere um identificador novo por evento.
 
 ```sh
-disposal_id=1
+# disposal_id deve conter o ID real retornado pelo POST escolhido.
 event_prefix=$(uuidgen)
 base_url=http://localhost:8080
 
 curl -fsS "$base_url/api/v1/iot/events" \
   -H "X-Device-Key: $IOT_DEVICE_KEY" -H 'Content-Type: application/json' \
-  -d "{\"eventId\":\"${event_prefix}-peso\",\"deviceId\":\"COL-001\",\"disposalId\":$disposal_id,\"eventType\":\"WEIGHT_RECORDED\",\"weightKg\":3.8}"
+  -d "{\"eventId\":\"${event_prefix}-peso\",\"deviceId\":\"COL-001\",\"disposalId\":$disposal_id,\"eventType\":\"WEIGHT_RECORDED\",\"weightKg\":0.500}"
 
 curl -fsS "$base_url/api/v1/iot/events" \
   -H "X-Device-Key: $IOT_DEVICE_KEY" -H 'Content-Type: application/json' \
@@ -270,8 +326,8 @@ curl -fsS -H "Authorization: Bearer $token" "$base_url/api/v1/disposals/$disposa
 ```
 
 As respostas `200` mostram `WAITING_DEPOSIT`, `DEPOSIT_IN_PROGRESS` e
-`COMPLETED`. Para um pequeno eletrodoméstico de 3,8 kg, a pesagem estima
-25 pontos e o fechamento registra um crédito na carteira do titular.
+`COMPLETED`. Para um celular de 0,500 kg, a pesagem estima
+33 pontos e o fechamento registra um crédito na carteira do titular.
 O descarte concluído libera o coletor. Consulte `awardedPoints` no
 descarte e a movimentação `CREDIT` no extrato.
 
@@ -292,16 +348,17 @@ curl -fsS "$base_url/api/v1/rewards" -H "Authorization: Bearer $token"
 curl -fsS "$base_url/api/v1/users/me/redemptions" -H "Authorization: Bearer $token"
 ```
 
-Após completar o exemplo de descarte da air fryer, a carteira retorna
-`200` com 25 pontos disponíveis.
+No perfil `bootstrap`, após completar o exemplo de descarte do celular, a carteira
+retorna `200` com 33 pontos disponíveis. Os IDs e custos dos benefícios abaixo são
+desse perfil; consulte o catálogo correspondente quando usar `postgres`.
 
 ```json
 {
-  "availablePoints": 25,
-  "totalEarned": 25,
+  "availablePoints": 33,
+  "totalEarned": 33,
   "totalRedeemed": 0,
   "transactions": [
-    {"id": 1, "type": "CREDIT", "points": 25, "description": "Descarte de Air fryer", "createdAt": "2026-11-12T20:15:00Z"}
+    {"id": 1, "type": "CREDIT", "points": 33, "description": "Descarte de Celular", "createdAt": "2026-11-12T20:15:00Z"}
   ]
 }
 ```
@@ -315,7 +372,7 @@ curl -fsS -X POST "$base_url/api/v1/rewards/10/redeem" \
   -H "Authorization: Bearer $token" -H "Idempotency-Key: $redemption_key"
 ```
 
-O resgate retorna `201`, gera um cupom fictício e deixa 5 pontos disponíveis
+O resgate retorna `201`, gera um cupom fictício e deixa 13 pontos disponíveis
 neste exemplo.
 
 ```json
@@ -324,7 +381,7 @@ neste exemplo.
   "rewardId": 10,
   "rewardName": "Cupom de frete grátis",
   "pointsSpent": 20,
-  "remainingPoints": 5,
+  "remainingPoints": 13,
   "couponCode": "RELOOP-1-43e2db87-d32f-4520-a8ac-12e455b139f6",
   "redeemedAt": "2026-11-12T20:30:00Z"
 }
@@ -332,7 +389,7 @@ neste exemplo.
 
 O histórico mostra o cupom e o saldo registrado no momento do resgate.
 O extrato passa a mostrar um `DEBIT` de 20 pontos seguido pelo `CREDIT`
-de 25. As duas listas ordenam os registros do mais recente para o mais antigo.
+de 33. As duas listas ordenam os registros do mais recente para o mais antigo.
 
 Ao repetir um resgate confirmado, envie a mesma `Idempotency-Key` com o
 mesmo benefício para obter o `201` original, mesmo se o saldo ou o estoque
@@ -347,8 +404,10 @@ unidade. A carteira, o catálogo e os resgates ficam em memória no
 
 O perfil `postgres` usa o [SQL original do Hiago](database/schema/database.sql),
 Spring Data JPA, transações reais e armazenamento durável de fotografias.
-Mantém as rotas da main: upload separado, criação de descarte com `photoId`,
-perfil em `/api/v1/users/me` e resgates em `/api/v1/rewards/{id}/redeem`.
+Os contratos mobile são os mesmos do `bootstrap`: perfil em `/api/v1/user`,
+distâncias simuladas no catálogo, CPF obrigatório no cadastro e descarte multipart.
+O perfil também aceita `/api/v1/users/me`, upload separado e descarte JSON com
+`photoId` para compatibilidade. Carteira, históricos e resgates mantêm suas rotas.
 
 Leia o [guia de integração PostgreSQL](docs/database/postgres-integration.md)
 para criar o banco uma única vez com Docker Compose, configurar o `.env`
@@ -360,7 +419,12 @@ O inicializador aguarda o healthcheck TCP do banco, com limite padrão de
 60 segundos (`POSTGRES_INIT_TIMEOUT_SECONDS`, exportada no shell). Falha ou
 timeout interrompe a operação antes de executar SQL. Use-o somente em banco
 vazio; para bancos já preenchidos, inicie apenas o serviço com
-`docker compose up -d --wait --wait-timeout 60 postgres` e execute o backend.
+`docker compose up -d --wait --wait-timeout 60 postgres`.
+Se ainda não foi aplicada nesse banco, execute explicitamente a migração
+[V001 de CPF](database/migrations/README.md) uma vez, tanto após o esquema original
+em instalações novas quanto em bancos existentes. O backend não migra o banco
+automaticamente; usuários legados mantêm CPF nulo. Se V001 já foi aplicada,
+não a reaplique. Depois inicie a aplicação.
 
 Os catálogos diferem entre os perfis. No SQL, o exemplo testado é Notebook,
 categoria 2, peso 2,300 kg, crédito 83, resgate de 80 e saldo 3. Os hashes e
@@ -381,7 +445,7 @@ Com Java 21 e Docker Desktop ativo:
 Os testes usam PostgreSQL real em contêineres descartáveis e um diretório de
 fotos temporário. Não precisam de `.env`, banco criado manualmente ou JWT
 externo. Incluem concorrência, rollback e reinício com HTTP real, além da
-regressão bootstrap. Após a auditoria, a suíte tem 65 testes, incluindo leitura
+regressão bootstrap. Após o formulário integrado, a suíte tem 196 testes, preservando os 138 anteriores, incluindo leitura
 consistente de carteira, estados de conclusão de upload, inicialização limitada
 e casos negativos de JWT, IoT e fotografias. Os relatórios ficam em
 `target/surefire-reports`. Veja as [correções da auditoria](docs/database/postgres-audit-fixes.md).
@@ -417,7 +481,7 @@ e casos negativos de JWT, IoT e fotografias. Os relatórios ficam em
 
 ## Convenções
 
-- API REST em `/api/v1`, recursos em inglês e no plural, JSON em camelCase.
+- API REST em `/api/v1`, recursos em inglês e JSON em camelCase. O perfil mobile usa `/api/v1/user`.
 - IDs de entidades em `Long`, coletores em string, fotos em UUID, pesos em
   `BigDecimal`, pontos em inteiros e datas ISO 8601 em UTC.
 - Requisições GET sem corpo. Erros com `status`, `code`, `message` e `timestamp`.

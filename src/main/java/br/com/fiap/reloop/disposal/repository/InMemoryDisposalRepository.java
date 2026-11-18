@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.UnaryOperator;
+import java.util.function.Supplier;
 
 import br.com.fiap.reloop.disposal.model.Disposal;
 import br.com.fiap.reloop.disposal.model.DisposalStatus;
@@ -44,6 +45,18 @@ public class InMemoryDisposalRepository implements DisposalRepository, IotEventR
         Disposal disposal = Disposal.start(nextId++, userId, deviceId, categoryId, itemName, photoId, Instant.now());
         disposals.put(disposal.id(), disposal);
         return disposal;
+    }
+
+    /** Bootstrap form boundary: readers/events cannot observe a disposal before the whole form succeeds. */
+    public synchronized <T> T withRollback(Supplier<T> work) {
+        long firstNewId = nextId;
+        try {
+            return work.get();
+        } catch (RuntimeException | Error failure) {
+            disposals.keySet().removeIf(id -> id >= firstNewId);
+            nextId = firstNewId;
+            throw failure;
+        }
     }
 
     @Override

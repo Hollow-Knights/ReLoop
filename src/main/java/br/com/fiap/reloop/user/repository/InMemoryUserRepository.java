@@ -16,6 +16,7 @@ public class InMemoryUserRepository implements UserRepository {
     private final WalletRepository wallets;
     private final Map<Long, User> users = new HashMap<>();
     private final Map<String, Long> idsByEmail = new HashMap<>();
+    private final Map<String, Long> idsByDocument = new HashMap<>();
     private long nextId = 1L;
 
     public InMemoryUserRepository(WalletRepository wallets) {
@@ -23,14 +24,18 @@ public class InMemoryUserRepository implements UserRepository {
     }
 
     @Override
-    public synchronized User create(String name, String normalizedEmail, String passwordHash) {
+    public synchronized User create(String name, String normalizedEmail, String passwordHash, String normalizedDocument) {
         if (idsByEmail.containsKey(normalizedEmail)) {
             throw new EmailAlreadyInUse();
         }
-        User user = new User(nextId, name, normalizedEmail, passwordHash);
+        if (idsByDocument.containsKey(normalizedDocument)) {
+            throw new DocumentAlreadyInUse();
+        }
+        User user = new User(nextId, name, normalizedEmail, passwordHash, normalizedDocument);
         wallets.open(user.id());
         users.put(user.id(), user);
         idsByEmail.put(user.email(), user.id());
+        idsByDocument.put(user.document(), user.id());
         nextId++;
         return user;
     }

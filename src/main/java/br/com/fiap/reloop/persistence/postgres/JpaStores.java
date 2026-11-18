@@ -15,6 +15,7 @@ public final class JpaStores {
     private JpaStores() { }
     public interface Users extends JpaRepository<UserRow, Long> {
         Optional<UserRow> findByEmailIgnoreCase(String email);
+        boolean existsByDocument(String document);
     }
     public interface Points extends JpaRepository<PointRow, Long> { }
     public interface Devices extends JpaRepository<DeviceRow, String> {

@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/v1/users/me")
+@RequestMapping({"/api/v1/user", "/api/v1/users/me"})
 @Profile({"bootstrap", "postgres"})
 public class UserController {
 

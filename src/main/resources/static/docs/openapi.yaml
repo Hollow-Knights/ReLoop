@@ -45,6 +45,8 @@ paths:
         como hash. No bootstrap, o cadastro também abre uma carteira em
         memória com saldo zero. No postgres, usuário e carteira são persistidos
         na mesma transação.
+        document é um CPF obrigatório, validado e normalizado para 11 dígitos.
+        Não é retornado no perfil nem incluído no JWT; duplicidade retorna 409.
       security: []
       requestBody:
         required: true
@@ -52,6 +54,21 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/RegisterRequest'
+            examples:
+              semPontuacao:
+                summary: CPF sintético gerado para demonstração, sem pontuação.
+                value:
+                  name: Ana Silva
+                  email: ana@example.com
+                  password: Senha123!
+                  document: '70000000159'
+              comPontuacao:
+                summary: O mesmo formato também aceita a máscara de CPF.
+                value:
+                  name: Ana Silva
+                  email: ana@example.com
+                  password: Senha123!
+                  document: 700.000.001-59
       responses:
         '201':
           description: Usuário cadastrado.
@@ -63,9 +80,9 @@ paths:
                 Profile:
                   $ref: '#/components/examples/Profile'
         '400':
-          $ref: '#/components/responses/EmailBadRequest'
+          $ref: '#/components/responses/RegistrationBadRequest'
         '409':
-          $ref: '#/components/responses/EmailConflict'
+          $ref: '#/components/responses/RegistrationConflict'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '500':
@@ -98,6 +115,63 @@ paths:
           $ref: '#/components/responses/EmailBadRequest'
         '401':
           $ref: '#/components/responses/InvalidCredentials'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/user:
+    get:
+      tags: [Usuários]
+      operationId: getUserProfile
+      summary: Consultar o perfil pelo contrato mobile (bootstrap e postgres)
+      description: Retorna exclusivamente o usuário identificado pelo JWT, sem receber ID como parâmetro. Mesmo contrato de GET /api/v1/users/me, preservado para compatibilidade.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Perfil do usuário autenticado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileResponse'
+              examples:
+                Profile:
+                  $ref: '#/components/examples/Profile'
+        '401':
+          $ref: '#/components/responses/IdentityUnauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    put:
+      tags: [Usuários]
+      operationId: updateUserProfile
+      summary: Atualizar o perfil pelo contrato mobile (bootstrap e postgres)
+      description: Atualiza nome e e-mail exclusivamente do titular do JWT. Mesmo corpo e resposta de PUT /api/v1/users/me, preservado para compatibilidade. O token continua identificando a mesma conta após a alteração.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: Perfil atualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileResponse'
+              examples:
+                Profile:
+                  $ref: '#/components/examples/Profile'
+        '400':
+          $ref: '#/components/responses/EmailBadRequest'
+        '401':
+          $ref: '#/components/responses/IdentityUnauthorized'
+        '409':
+          $ref: '#/components/responses/EmailConflict'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '500':
@@ -160,7 +234,10 @@ paths:
       tags: [Pontos de coleta]
       operationId: listCollectionPoints
       summary: Listar pontos de coleta (implementado no bootstrap e postgres)
-      description: Nos perfis bootstrap e postgres, a consulta funciona sem JWT e retorna [] quando a lista está vazia.
+      description: |
+        Nos perfis bootstrap e postgres, a consulta funciona sem JWT e retorna [] quando a lista está vazia.
+        distanceFromUserLocation é uma distância simulada em quilômetros, estável pelo ID do ecoponto.
+        Não usa localização do usuário e não representa distância real ou trajeto por ruas.
       security: []
       responses:
         '200':
@@ -184,7 +261,10 @@ paths:
       tags: [Pontos de coleta]
       operationId: getCollectionPoint
       summary: Consultar ponto de coleta, categorias aceitas e coletores (implementado no bootstrap e postgres)
-      description: Nos perfis bootstrap e postgres, a consulta funciona sem JWT. Um ID positivo inexistente retorna 404.
+      description: |
+        Nos perfis bootstrap e postgres, a consulta funciona sem JWT. Um ID positivo inexistente retorna 404.
+        distanceFromUserLocation é a mesma distância simulada em quilômetros exibida na listagem.
+        Não usa localização do usuário e não representa distância real ou trajeto por ruas.
       security: []
       responses:
         '200':
@@ -317,12 +397,24 @@ paths:
         a categoria. A foto deve pertencer ao cidadão e estar livre para associação.
         Cada coletor admite uma sessão ativa por vez. O usuário é identificado pelo
         contexto da requisição.
+        Aceita JSON com photoId já enviado pelo endpoint de upload, ou multipart/form-data
+        com deviceId, categoryId, itemName e file. No multipart, a foto é criada para o
+        titular do JWT e associada somente ao novo descarte. Não envie photoId nesse formato.
+        No postgres, metadados e descarte usam a mesma transação; rollback confirmado
+        remove o arquivo, e STATUS_UNKNOWN preserva o arquivo para reconciliação.
+        No bootstrap, falhas revertem o descarte e compensam somente os uploads criados pela requisição.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateDisposalRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CreateDisposalFormRequest'
+            encoding:
+              file:
+                contentType: 'image/jpeg, image/png'
       responses:
         '201':
           description: Descarte em WAITING_WEIGHT, com peso e estimativa nulos e zero pontos creditados.
@@ -334,19 +426,21 @@ paths:
                 WaitingDisposal:
                   $ref: '#/components/examples/WaitingDisposal'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/DisposalFormBadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/CreationNotFound'
         '409':
           $ref: '#/components/responses/CreationConflict'
+        '413':
+          $ref: '#/components/responses/FileTooLarge'
         '415':
-          $ref: '#/components/responses/UnsupportedMediaType'
+          $ref: '#/components/responses/PhotoUnsupportedMediaType'
         '422':
           $ref: '#/components/responses/CategoryNotAccepted'
         '500':
-          $ref: '#/components/responses/InternalError'
+          $ref: '#/components/responses/DisposalFormInternalError'
 
   /api/v1/disposals/{id}:
     parameters:
@@ -629,6 +723,61 @@ components:
         $ref: '#/components/schemas/EntityId'
 
   responses:
+    DisposalFormBadRequest:
+      description: JSON ou formulário inválido, campos obrigatórios ausentes, arquivo
+        vazio ou imagem truncada. Mensagens específicas de foto aplicam-se ao multipart;
+        o JSON com photoId continua aceito.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            ValidationError:
+              $ref: '#/components/examples/ValidationError'
+            EmptyPhoto:
+              $ref: '#/components/examples/EmptyPhoto'
+            InvalidPhotoContent:
+              $ref: '#/components/examples/InvalidPhotoContent'
+    DisposalFormInternalError:
+      description: Falha de persistência, erro HTTP 5xx tratado pelo Spring MVC ou falha
+        de armazenamento da fotografia no formulário.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            PersistenceFailure:
+              $ref: '#/components/examples/PersistenceFailure'
+            FrameworkInternalError:
+              $ref: '#/components/examples/FrameworkInternalError'
+            PhotoStorageFailure:
+              $ref: '#/components/examples/PhotoStorageFailure'
+    RegistrationBadRequest:
+      description: Dados inválidos, inclusive CPF ausente, nulo, formato ou dígitos verificadores
+        inválidos. A mensagem HTTP de validação permanece genérica.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            ValidationError:
+              $ref: '#/components/examples/ValidationError'
+            EmailTooLong:
+              $ref: '#/components/examples/EmailTooLong'
+            InvalidDocument:
+              $ref: '#/components/examples/InvalidDocument'
+    RegistrationConflict:
+      description: E-mail normalizado ou CPF já cadastrado, inclusive em cadastros concorrentes.
+        Nenhum dado pessoal é devolvido no conflito.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            EmailAlreadyInUse:
+              $ref: '#/components/examples/EmailAlreadyInUse'
+            DocumentAlreadyInUse:
+              $ref: '#/components/examples/DocumentAlreadyInUse'
     BadRequest:
       description: Entrada ausente, malformada ou inválida. A validação HTTP retorna a mensagem genérica Bad Request.
       content:
@@ -947,6 +1096,21 @@ components:
             MissingDisposalCategory:
               $ref: '#/components/examples/MissingDisposalCategory'
   examples:
+    InvalidDocument:
+      summary: CPF obrigatório ausente/nulo, formato incorreto, sequência repetida ou
+        dígitos verificadores inválidos.
+      value:
+        status: 400
+        code: BAD_REQUEST
+        message: Bad Request
+        timestamp: '2026-11-18T17:00:00Z'
+    DocumentAlreadyInUse:
+      summary: CPF já associado a uma conta, com ou sem pontuação na entrada.
+      value:
+        status: 409
+        code: DOCUMENT_ALREADY_IN_USE
+        message: CPF já cadastrado.
+        timestamp: '2026-11-18T17:00:00Z'
     ValidationError:
       summary: JSON malformado, campos ausentes, validação de campos ou parâmetros.
       value:
@@ -1227,6 +1391,7 @@ components:
         latitude: -20.4628
         longitude: -54.6152
         isActive: true
+        distanceFromUserLocation: 1.2
     CollectionPoint:
       summary: Exemplo ilustrativo no perfil postgres; IDs, horários e catálogo variam.
       value:
@@ -1236,6 +1401,7 @@ components:
         latitude: -20.4628
         longitude: -54.6152
         isActive: true
+        distanceFromUserLocation: 1.2
         acceptedCategoryIds:
         - 1
         - 2
@@ -1454,9 +1620,19 @@ components:
         timestamp:
           $ref: '#/components/schemas/UtcTimestamp'
 
+    CpfDocument:
+      type: string
+      writeOnly: true
+      pattern: ^(?:[0-9]{11}|[0-9]{3}\.[0-9]{3}\.[0-9]{3}-[0-9]{2})$
+      description: CPF brasileiro obrigatório para novos cadastros, com dígitos verificadores
+        válidos e sem sequências repetidas. Aceita somente 11 dígitos ou máscara 000.000.000-00,
+        sem espaços. Normalizado para 11 dígitos e único por conta. Não é retornado no
+        cadastro/perfil nem incluído no JWT. Usuários legados podem manter CPF nulo internamente.
+      example: '70000000159'
+
     RegisterRequest:
       type: object
-      required: [name, email, password]
+      required: [name, email, password, document]
       properties:
         name:
           $ref: '#/components/schemas/UserName'
@@ -1468,6 +1644,9 @@ components:
           minLength: 8
           maxLength: 256
           writeOnly: true
+        document:
+          $ref: '#/components/schemas/CpfDocument'
+
     LoginRequest:
       type: object
       required: [email, password]
@@ -1516,9 +1695,16 @@ components:
           description: Tempo de validade em segundos.
           example: 3600
 
+    SimulatedDistanceKm:
+      type: number
+      format: double
+      minimum: 0
+      readOnly: true
+      description: Distância simulada em quilômetros para demonstração do MVP. Determinística pelo ID do ecoponto, idêntica na lista e no detalhe em ambos os perfis. Não usa GPS e não representa localização real, distância calculada ou trajeto por ruas.
+      example: 1.2
     CollectionPointResponse:
       type: object
-      required: [id, name, address, latitude, longitude, isActive]
+      required: [id, name, address, latitude, longitude, isActive, distanceFromUserLocation]
       properties:
         id:
           $ref: '#/components/schemas/EntityId'
@@ -1538,6 +1724,8 @@ components:
           maximum: 180
         isActive:
           type: boolean
+        distanceFromUserLocation:
+          $ref: '#/components/schemas/SimulatedDistanceKm'
     CollectionPointDetailResponse:
       allOf:
         - $ref: '#/components/schemas/CollectionPointResponse'
@@ -1595,6 +1783,29 @@ components:
           $ref: '#/components/schemas/PhotoId'
         photoUrl:
           $ref: '#/components/schemas/PhotoUrl'
+    CreateDisposalFormRequest:
+      type: object
+      required:
+      - deviceId
+      - categoryId
+      - itemName
+      - file
+      properties:
+        deviceId:
+          $ref: '#/components/schemas/DeviceId'
+        categoryId:
+          $ref: '#/components/schemas/EntityId'
+        itemName:
+          type: string
+          minLength: 1
+          maxLength: 120
+          example: Celular
+        file:
+          type: string
+          format: binary
+          description: JPEG/PNG real de 1 byte a 10 MiB, validado pelo conteúdo. Obrigatório;
+            nome e MIME declarado não substituem a validação da imagem.
+
     CreateDisposalRequest:
       type: object
       additionalProperties: false

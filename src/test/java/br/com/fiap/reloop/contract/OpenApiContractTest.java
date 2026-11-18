@@ -43,6 +43,68 @@ class OpenApiContractTest {
         for (JsonNode child : node) checkReferences(child);
     }
 
+    @Test void mobileProfileAliasesKeepTheOriginalContractsAndJwtSecurity() {
+        JsonNode mobile = DOCUMENT.at("/paths/~1api~1v1~1user");
+        JsonNode legacy = DOCUMENT.at("/paths/~1api~1v1~1users~1me");
+        for (String method : List.of("get", "put")) {
+            JsonNode alias = mobile.path(method);
+            JsonNode original = legacy.path(method);
+            assertThat(alias.isMissingNode()).isFalse();
+            assertThat(alias.path("responses")).isEqualTo(original.path("responses"));
+            assertThat(alias.path("requestBody")).isEqualTo(original.path("requestBody"));
+            assertThat(alias.path("security")).isEqualTo(DOCUMENT.path("security"));
+            assertThat(alias.has("parameters")).isFalse();
+            assertThat(alias.path("operationId")).isNotEqualTo(original.path("operationId"));
+        }
+    }
+
+    @Test void collectionDistanceIsRequiredNumericAndExplicitlySimulated() {
+        JsonNode point = DOCUMENT.at("/components/schemas/CollectionPointResponse");
+        assertThat(point.path("required")).anySatisfy(field -> assertThat(field.asText()).isEqualTo("distanceFromUserLocation"));
+        JsonNode distance = resolve(point.at("/properties/distanceFromUserLocation"));
+        assertThat(distance.path("type").asText()).isEqualTo("number");
+        assertThat(distance.path("minimum").asDouble()).isZero();
+        assertThat(distance.path("description").asText()).contains("simulada", "quilômetros", "Não usa GPS", "não representa", "trajeto por ruas");
+        assertThat(DOCUMENT.at("/components/schemas/CollectionPointDetailResponse/allOf/0/$ref").asText())
+                .isEqualTo("#/components/schemas/CollectionPointResponse");
+        JsonNode listExample = DOCUMENT.at("/components/examples/CollectionPoints/value/0/distanceFromUserLocation");
+        JsonNode detailExample = DOCUMENT.at("/components/examples/CollectionPoint/value/distanceFromUserLocation");
+        assertThat(listExample.isNumber()).isTrue();
+        assertThat(detailExample).isEqualTo(listExample);
+    }
+
+    @Test void registrationRequiresPrivateCpfAndDocumentsItsOwnErrors() {
+        JsonNode request = DOCUMENT.at("/components/schemas/RegisterRequest");
+        assertThat(request.path("required")).anySatisfy(field -> assertThat(field.asText()).isEqualTo("document"));
+        JsonNode document = resolve(request.at("/properties/document"));
+        assertThat(document.path("type").asText()).isEqualTo("string");
+        assertThat(document.path("writeOnly").asBoolean()).isTrue();
+        assertThat(document.path("description").asText()).contains("CPF", "verificadores", "11 dígitos");
+        assertThat(DOCUMENT.at("/components/schemas/ProfileResponse/properties").has("document")).isFalse();
+        var errors = resolve(DOCUMENT.at("/paths/~1api~1v1~1auth~1register/post/responses/409"))
+                .at("/content/application~1json/examples");
+        assertThat(resolve(errors.path("DocumentAlreadyInUse")).at("/value/code").asText()).isEqualTo("DOCUMENT_ALREADY_IN_USE");
+        assertThat(errors.has("EmailAlreadyInUse")).isTrue();
+    }
+
+    @Test void disposalDocumentsBothJsonAndMultipartWithoutChangingTheSuccessContract() {
+        JsonNode operation = DOCUMENT.at("/paths/~1api~1v1~1disposals/post");
+        JsonNode content = operation.at("/requestBody/content");
+        assertThat(content.path("application/json").at("/schema/$ref").asText())
+                .isEqualTo("#/components/schemas/CreateDisposalRequest");
+        JsonNode form = resolve(content.path("multipart/form-data").path("schema"));
+        var required = new java.util.HashSet<String>();
+        form.path("required").forEach(field -> required.add(field.asText()));
+        assertThat(required).containsExactlyInAnyOrder("deviceId", "categoryId", "itemName", "file");
+        assertThat(form.at("/properties/file/format").asText()).isEqualTo("binary");
+        assertThat(resolve(form.at("/properties/categoryId")).path("type").asText()).isEqualTo("integer");
+        assertThat(form.path("properties").has("photoId")).isFalse();
+        assertThat(operation.at("/responses/201/content/application~1json/schema/$ref").asText())
+                .isEqualTo("#/components/schemas/DisposalResponse");
+        assertThat(operation.path("responses").has("413")).isTrue();
+        assertThat(operation.path("description").asText()).contains("STATUS_UNKNOWN", "multipart/form-data");
+    }
+
     @ParameterizedTest(name = "{1} {0}: response examples and authentication")
     @MethodSource("operations")
     void everyOperationHasContextualResponseExamples(String path, String method, JsonNode operation) {

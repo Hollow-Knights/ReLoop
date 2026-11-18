@@ -1,10 +1,10 @@
 # Integração PostgreSQL — SQL do Hiago
 
-Implementação em `feat/postgres-integration`, a partir da `origin/main`
-`46317a52531ed479967cdbb19ee03f6d84ff7612`. As branches de alinhamento HTTP e
-regressão permaneceram preservadas e não foram incorporadas. A base `main`
-não tinha classes de teste; os testes desta entrega foram criados para as
-rotas oficiais dessa base.
+A integração inicial foi desenvolvida em `feat/postgres-integration`, a partir da
+`origin/main` `46317a52531ed479967cdbb19ee03f6d84ff7612`. Este guia contempla também
+os três blocos de `feat/mobile-contract-alignment`: perfil mobile, distância
+simulada dos ecopontos, cadastro com CPF e formulário de descarte com fotografia.
+A especificação OpenAPI versionada define os contratos atuais.
 
 ## SQL recebido e auditoria
 
@@ -25,7 +25,7 @@ resultante foi:
 
 | Tabela | Linhas iniciais | Mapeamento Java e correspondência |
 | --- | ---: | --- |
-| `users` | 5 | `UserRow`: identidade bigint, nome/e-mail, hash e auditoria Instant/timestamptz. `JpaUserAdapter` implementa `UserRepository`. |
+| `users` | 5 | `UserRow`: identidade bigint, nome/e-mail, hash e auditoria Instant/timestamptz; V001 acrescenta `document varchar(11)` anulável. `JpaUserAdapter` implementa `UserRepository`. |
 | `collection_points` | 4 | `PointRow`: ID, nome, endereço, double/coordenadas e `is_active`. |
 | `collection_devices` | 5 | `DeviceRow`: PK textual `device_id`, FK para ponto e atividade. |
 | `electronic_categories` | 5 | `CategoryRow`: parâmetros integer, limites BigDecimal/numeric(10,3). |
@@ -66,13 +66,15 @@ esse roteiro não deve ser executado em um banco importante.
 | Cancelamento | Compatível: somente WAITING_WEIGHT pode ser cancelado, com peso/estimativa nulos. Não se libera descarte já pesado por alteração silenciosa do CHECK. |
 | Snapshots IoT do seed | Os JSON demonstrativos são parciais. O adaptador completa os campos ausentes a partir de valores imutáveis do descarte, com zero concedido antes da conclusão. Eventos novos guardam todos os campos da resposta HTTP. Replays devolvem o estado original mesmo depois de eventos posteriores. |
 | Tipos e tempo | UUID mapeia UUID, jsonb mapeia JsonNode, numeric mapeia BigDecimal e timestamptz mapeia Instant. Novos instantes de persistência são produzidos em microssegundos para que a primeira resposta e o replay tenham a mesma precisão do PostgreSQL. |
-| Perfis e segurança | Controllers/serviços existentes e autenticação foram habilitados também em postgres. Rotas, nomes de DTO e fluxos da main foram preservados. Apenas a restrição de precisão aprovada alterou o OpenAPI. Não existem `/api/v1/user`, benefícios agregados ou formulário unificado nesta branch. |
+| Perfis e segurança | Os dois perfis oferecem `GET/PUT /api/v1/user`, mantendo `/api/v1/users/me`; CPF é obrigatório em novos cadastros e não aparece no perfil/JWT. O catálogo inclui `distanceFromUserLocation` simulada em km, estável por ID e igual na lista e no detalhe. `POST /api/v1/disposals` aceita multipart com foto ou JSON com `photoId`; o upload separado permanece disponível. Carteira, históricos e resgates mantêm suas rotas. |
 
 ## Transações, locks e idempotência
 
 - **Cadastro:** inserção de usuário e carteira zerada na mesma transação.
-  O índice `ux_users_email_lower` resolve corridas de cadastro/atualização;
-  o adaptador traduz somente essa constraint para o conflito de e-mail.
+  Os índices `ux_users_email_lower` e `ux_users_document` garantem unicidade de
+  e-mail normalizado e CPF preenchido. No cadastro, `INSERT ... ON CONFLICT DO
+  NOTHING RETURNING id` decide a concorrência sem registrar CPF em exceções SQL
+  esperadas. Os conflitos HTTP usam `EMAIL_ALREADY_IN_USE` ou `DOCUMENT_ALREADY_IN_USE`.
 - **Cadastro de descarte:** bloqueia a linha do coletor; testa foto já
   vinculada e sessão ativa; insere o descarte. A unicidade parcial de
   dispositivo e a unicidade da foto complementam o lock, inclusive se
@@ -141,6 +143,10 @@ set -a
 set +a
 # Somente na primeira execução, com o banco vazio:
 ./scripts/init-postgres.sh
+# Após criar o esquema original, aplique V001 uma vez; consulte database/migrations/README.md.
+docker compose exec -T postgres sh -c \
+  'exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+  < database/migrations/V001__add_user_document.sql
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres
 ```
 
@@ -164,12 +170,17 @@ persistente novo na máquina do usuário durante esta tarefa.
 Não existe Flyway/Liquibase na base main. A estratégia desta entrega é o
 SQL original aplicado **uma vez**, com `spring.sql.init.mode=never` e
 `ddl-auto=validate`. Nenhum DDL é executado pelo backend ao iniciar, e a
-carga em memória não é ativada no perfil postgres. Mudanças futuras de DDL
-precisarão de migrações versionadas acordadas com Hiago; não se deve reaplicar
-o arquivo inicial sobre dados existentes.
+carga em memória não é ativada no perfil postgres. O cadastro com CPF adiciona a migração manual versionada
+[V001](../../database/migrations/README.md), sem alterar o original. Ela precisa
+ser aplicada explicitamente uma vez antes de iniciar esta versão, inclusive em
+bancos já preenchidos; mantém CPF NULL para os cinco usuários legados. Se esse
+banco já recebeu V001, não a reaplique. DDL futuro deve continuar
+versionado e coordenado; não reaplique o arquivo inicial sobre dados existentes.
 
-Se o banco já estiver preenchido, **não execute o inicializador**. Com as
-variáveis do `.env` exportadas, as próximas subidas usam somente:
+Se o banco já estiver preenchido, **não execute o inicializador**.
+Confira se V001 já foi aplicada. Somente se estiver pendente, aplique-a seguindo
+o guia de migrações, mediante autorização do responsável pelo banco. Com V001
+já aplicada e as variáveis do `.env` exportadas, as próximas subidas usam somente:
 
 ```sh
 docker compose up -d --wait --wait-timeout "${POSTGRES_INIT_TIMEOUT_SECONDS:-60}" postgres
@@ -196,15 +207,29 @@ A base original é recarregada entre os métodos nos bancos descartáveis.
 
 | Classe | Execuções | Verificações |
 | --- | ---: | --- |
-| `PostgresIntegrationTest` | 49 | Jornada e regressões anteriores; carteira consistente com resgate entre consultas; JWT ausente/malformado/expirado/assinatura e emissor incorretos/sem assinatura; isolamento; credenciais e payloads IoT; fotos ausentes/vazias/falsas/truncadas/GIF/grandes; PNG/JPEG; inicialização e rejeição da reaplicação em banco Testcontainers. |
-| `PostgresRestartHttpTest` | 1 | HTTP real/Tomcat, rejeição 413 de upload grande, encerramento completo, nova aplicação e recuperação de foto, usuário, carteira, eventos e cupom. |
-| `BootstrapRegressionTest` | 3 | Health, catálogo, cadastro/login, precisão e jornada completa com crédito/resgate/replays. Cada método tem contexto próprio. |
+| `PostgresIntegrationTest` | 104 | Jornada e regressões anteriores; carteira consistente com resgate entre consultas; JWT ausente/malformado/expirado/assinatura e emissor incorretos/sem assinatura; isolamento; credenciais e payloads IoT; fotos ausentes/vazias/falsas/truncadas/GIF/grandes; PNG/JPEG; inicialização e rejeição da reaplicação em banco Testcontainers. |
+| `PostgresRestartHttpTest` | 2 | HTTP real/Tomcat, rejeição 413 de upload grande, encerramento completo, nova aplicação e recuperação de foto, usuário, carteira, eventos e cupom. |
+| `BootstrapRegressionTest` | 48 | Health, catálogo, cadastro/login, precisão e jornada completa com crédito/resgate/replays. Cada método tem contexto próprio. |
 | `PhotoCompletionTest` | 3 | Callback de commit, rollback e resultado desconhecido, com bytes reais e store simulado; retenção/limpeza e aviso de reconciliação. |
 | `PostgresInitializationScriptTest` | 9 | Script real com Docker CLI simulado: espera saudável com limite, timeout configurável, falha sem executar SQL, propagação de erro de banco preenchido e cinco valores inválidos de timeout. |
 
-Resultado em Java 21 após as correções: **65 testes, 65 passaram, zero falhas,
+Além das regressões anteriores, `OpenApiContractTest` executa 26 verificações de
+contrato e `UserDocumentPrivacyTest` executa duas de privacidade/rollback em memória.
+Os cenários de CPF cobrem ambos os perfis, zeros iniciais, normalização, formatos
+inválidos, duplicidade, concorrência, migração de legados e reinicialização.
+
+O formulário multipart reutiliza as validações e serviços existentes. Uma fronteira
+transacional de serviço no perfil postgres inclui metadados de foto e descarte;
+o callback de `JpaPhotoStorage` continua responsável pelo arquivo em rollback ou
+resultado desconhecido. Os testes abrangem JPEG/PNG, campos, credenciais, isolamento,
+concorrência, falha de escrita/fechamento e falha na inserção do descarte. O teste
+TCP recupera foto e descarte após reiniciar a aplicação e verifica o limite real
+do servlet. `TemporaryPhotoScopeTest` adiciona duas verificações de compensação
+e preservação de registros/fotos anteriores no bootstrap.
+
+Resultado em Java 21 após o formulário integrado: **196 testes, 196 passaram, zero falhas,
 erros ou ignorados; BUILD SUCCESS** (`./mvnw clean verify`). Os relatórios estão
-em `target/surefire-reports`. Os 27 testes anteriores foram preservados.
+em `target/surefire-reports`. Os 138 testes anteriores ao formulário integrado foram preservados.
 
 O teste da carteira intercala consultas e resgate usando latches, sem sleeps.
 Com o comportamento anterior `READ COMMITTED`, ele foi executado e falhou:
@@ -225,7 +250,8 @@ com resultado desconhecido também é esperado no teste correspondente.
 
 Apenas o bootstrap pode ser verificado sem Docker com
 `./mvnw -Dtest=BootstrapRegressionTest test`; isso não substitui o verify completo.
-Não foi importada a suíte da branch adiada nem foram acrescentados endpoints.
+Não foi importada a suíte da branch adiada. As rotas mobile foram acrescentadas
+pelos blocos de alinhamento descritos no OpenAPI, mantendo as rotas anteriores.
 
 ## Pendências e limites
 
