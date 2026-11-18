@@ -409,4 +409,27 @@ class PostgresIntegrationTest {
         }
         assertThat(jdbc.queryForObject("SELECT count(*) FROM redemptions WHERE user_id=6",Integer.class)).isEqualTo(1);
     }
+    @Test void initializationGuardCreatesAnEmptyDisposableDatabaseAndRefusesReapplication() throws Exception {
+        assertThat(DB.execInContainer("mkdir", "-p", "/opt/reloop").getExitCode()).isZero();
+        DB.copyFileToContainer(MountableFile.forHostPath(SQL), "/opt/reloop/database.sql");
+        String shell = Files.readString(Path.of("scripts/init-postgres.sh"));
+        String marker = "<<'SQL'\n";
+        String guard = shell.substring(shell.indexOf(marker) + marker.length(), shell.lastIndexOf("\nSQL")) + "\n";
+        DB.copyFileToContainer(org.testcontainers.images.builder.Transferable.of(guard.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                "/tmp/reloop-init-guard-test.sql");
+        String database = "init_guard_" + UUID.randomUUID().toString().replace("-", "");
+        assertThat(DB.execInContainer("createdb", "-U", DB.getUsername(), database).getExitCode()).isZero();
+        var first = DB.execInContainer("psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", DB.getUsername(), "-d", database,
+                "-f", "/tmp/reloop-init-guard-test.sql");
+        assertThat(first.getExitCode()).isZero();
+        var second = DB.execInContainer("psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", DB.getUsername(), "-d", database,
+                "-f", "/tmp/reloop-init-guard-test.sql");
+        assertThat(second.getExitCode()).isEqualTo(3);
+        assertThat(second.getStderr()).contains("Inicialização recusada");
+        var counts = DB.execInContainer("psql", "-X", "-At", "-U", DB.getUsername(), "-d", database, "-c",
+                "SELECT (SELECT count(*) FROM users)||':'||(SELECT count(*) FROM disposals)||':'||"
+                + "(SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE')");
+        assertThat(counts.getExitCode()).isZero();
+        assertThat(counts.getStdout().strip()).isEqualTo("5:10:12");
+    }
 }
