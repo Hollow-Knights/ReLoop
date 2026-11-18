@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
+# Compose mounts database/schema/database.sql read-only at /opt/reloop/database.sql.
 # Explicit one-time operation on this Compose project's database, never on a host DB_URL.
 docker compose exec -T postgres sh -c 'exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
 SELECT pg_advisory_lock(hashtextextended('reloop-manual-init', 0));

@@ -345,7 +345,7 @@ unidade. A carteira, o catálogo e os resgates ficam em memória no
 
 ## Executar com PostgreSQL
 
-O perfil `postgres` usa o [SQL original do Hiago](database/hiago/database.sql),
+O perfil `postgres` usa o [SQL original do Hiago](database/schema/database.sql),
 Spring Data JPA, transações reais e armazenamento durável de fotografias.
 Mantém as rotas da main: upload separado, criação de descarte com `photoId`,
 perfil em `/api/v1/users/me` e resgates em `/api/v1/rewards/{id}/redeem`.

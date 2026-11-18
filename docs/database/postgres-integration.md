@@ -8,9 +8,9 @@ rotas oficiais dessa base.
 
 ## SQL recebido e auditoria
 
-O arquivo [database.sql](../../database/hiago/database.sql) é uma cópia byte a
+O arquivo [database.sql](../../database/schema/database.sql) é uma cópia byte a
 byte do arquivo entregue pelo Hiago, incluindo DDL, carga inicial e oito
-consultas demonstrativas. O [DER](../../database/hiago/der.jpg) foi preservado.
+consultas demonstrativas. O [DER](../../database/schema/der.jpg) foi preservado.
 SHA-256 do SQL:
 
 `64e8e7abc711fc8f147eee8f83561858fca1f4b67147648693116a650c7bdabe`

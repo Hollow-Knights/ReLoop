@@ -24,7 +24,7 @@ import org.testcontainers.utility.MountableFile;
 @Testcontainers
 class PostgresRestartHttpTest {
     @Container static final PostgreSQLContainer<?> DB=new PostgreSQLContainer<>("postgres:16.11-alpine3.23")
-            .withCopyFileToContainer(MountableFile.forHostPath(Path.of("database/hiago/database.sql").toAbsolutePath()),
+            .withCopyFileToContainer(MountableFile.forHostPath(Path.of("database/schema/database.sql").toAbsolutePath()),
                     "/docker-entrypoint-initdb.d/01-hiago.sql");
     private final HttpClient http=HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(10)).build();
     private final ObjectMapper mapper=new ObjectMapper();
