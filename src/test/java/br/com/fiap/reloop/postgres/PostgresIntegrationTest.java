@@ -18,6 +18,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import br.com.fiap.reloop.persistence.postgres.JpaStores;
 import static org.mockito.Mockito.doAnswer;
@@ -409,6 +410,188 @@ class PostgresIntegrationTest {
         }
         assertThat(jdbc.queryForObject("SELECT count(*) FROM redemptions WHERE user_id=6",Integer.class)).isEqualTo(1);
     }
+    private String badJwt(String kind, String valid) throws Exception {
+        if (kind.equals("missing")) return null;
+        if (kind.equals("malformed")) return "not-a-jwt";
+        var original = com.nimbusds.jwt.SignedJWT.parse(valid).getJWTClaimsSet();
+        var claims = new com.nimbusds.jwt.JWTClaimsSet.Builder(original);
+        if (kind.equals("expired")) {
+            claims.issueTime(Date.from(java.time.Instant.now().minusSeconds(7200)))
+                    .expirationTime(Date.from(java.time.Instant.now().minusSeconds(3600)));
+        }
+        if (kind.equals("wrong-issuer")) claims.issuer("urn:reloop:wrong-issuer");
+        if (kind.equals("unsigned")) return new com.nimbusds.jwt.PlainJWT(claims.build()).serialize();
+        byte[] signingKey = Base64.getDecoder().decode(SECRET);
+        if (kind.equals("wrong-signature")) {
+            signingKey = new byte[32];
+            new SecureRandom().nextBytes(signingKey);
+        }
+        var signed = new com.nimbusds.jwt.SignedJWT(new com.nimbusds.jose.JWSHeader.Builder(com.nimbusds.jose.JWSAlgorithm.HS256)
+                .type(com.nimbusds.jose.JOSEObjectType.JWT).build(), claims.build());
+        signed.sign(new com.nimbusds.jose.crypto.MACSigner(signingKey));
+        return signed.serialize();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"missing", "malformed", "expired", "wrong-signature", "wrong-issuer", "unsigned"})
+    void invalidJwtCannotReadOrChangePrivateResources(String kind) throws Exception {
+        String valid = register();
+        String photo = upload(valid);
+        long id = body(create(valid, photo).andExpect(status().isCreated()).andReturn()).get("id").asLong();
+        // Prove that this token-building path is accepted before changing one security property.
+        mvc.perform(get("/api/v1/users/me").header("Authorization", auth(badJwt("valid-control", valid))))
+                .andExpect(status().isOk());
+        String rejected = badJwt(kind, valid);
+        String expectedCode = kind.equals("missing") ? "AUTHENTICATION_REQUIRED" : "INVALID_TOKEN";
+        for (String path : List.of("/api/v1/users/me", "/api/v1/users/me/wallet", "/api/v1/rewards",
+                "/api/v1/users/me/disposals", "/api/v1/users/me/redemptions", "/api/v1/disposals/" + id,
+                "/api/v1/uploads/" + photo)) {
+            var request = get(path);
+            if (rejected != null) request.header("Authorization", auth(rejected));
+            mvc.perform(request).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value(expectedCode));
+        }
+        for (var request : List.of(delete("/api/v1/disposals/" + id), post("/api/v1/disposals"),
+                post("/api/v1/rewards/2/redeem"), put("/api/v1/users/me"))) {
+            if (rejected != null) request.header("Authorization", auth(rejected));
+            mvc.perform(request).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value(expectedCode));
+        }
+        var uploadRequest = multipart("/api/v1/uploads").file(new MockMultipartFile("file", "x.png", "image/png", png()));
+        if (rejected != null) uploadRequest.header("Authorization", auth(rejected));
+        mvc.perform(uploadRequest).andExpect(status().isUnauthorized());
+        assertThat(jdbc.queryForObject("SELECT status FROM disposals WHERE id=?", String.class, id)).isEqualTo("WAITING_WEIGHT");
+        assertThat(count("uploaded_files")).isEqualTo(11);
+        mvc.perform(get("/api/v1/disposals/" + id).header("Authorization", auth(valid)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.photoId").value(photo));
+    }
+
+    @Test void authenticatedUsersCannotReadCancelOrLinkAnotherUsersResources() throws Exception {
+        String emailA = UUID.randomUUID() + "@example.test";
+        String emailB = UUID.randomUUID() + "@example.test";
+        String a = register(emailA); String b = register(emailB); String photo = upload(a);
+        long id = body(create(a, photo).andExpect(status().isCreated()).andReturn()).get("id").asLong();
+        mvc.perform(get("/api/v1/disposals/" + id).header("Authorization", auth(b))).andExpect(status().isNotFound());
+        mvc.perform(delete("/api/v1/disposals/" + id).header("Authorization", auth(b))).andExpect(status().isNotFound());
+        mvc.perform(get("/api/v1/uploads/" + photo).header("Authorization", auth(b))).andExpect(status().isNotFound());
+        create(b, photo).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+        mvc.perform(get("/api/v1/disposals/" + id).header("Authorization", auth(a)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("WAITING_WEIGHT"));
+        complete(id);
+        redeem(mvc, a, "owner-only", 2).andExpect(status().isCreated());
+        for (String path : List.of("/api/v1/users/me/disposals", "/api/v1/users/me/redemptions")) {
+            mvc.perform(get(path).header("Authorization", auth(b)).param("userId", "6"))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+            mvc.perform(get(path).header("Authorization", auth(a)))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
+        }
+        mvc.perform(get("/api/v1/users/me/wallet").header("Authorization", auth(b)).param("userId", "6"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.availablePoints").value(0))
+                .andExpect(jsonPath("$.transactions.length()").value(0));
+        mvc.perform(get("/api/v1/users/me").header("Authorization", auth(b)).param("userId", "6"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.email").value(emailB));
+        mvc.perform(get("/api/v1/uploads/" + photo).header("Authorization", auth(a)))
+                .andExpect(status().isOk()).andExpect(content().bytes(png())).andExpect(header().string("Cache-Control", "no-store"));
+    }
+
+    private String weightPayload(long id, String eventId, String device, String weight) {
+        return "{\"eventId\":\"" + eventId + "\",\"deviceId\":\"" + device + "\",\"disposalId\":" + id
+                + ",\"eventType\":\"WEIGHT_RECORDED\",\"weightKg\":" + weight + "}";
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"missing", "wrong", "duplicate", "citizen-jwt"})
+    void iotRequiresItsOwnSingleDeviceCredential(String credential) throws Exception {
+        String token = register(); long id = start(token);
+        var request = post("/api/v1/iot/events").contentType(MediaType.APPLICATION_JSON)
+                .content(weightPayload(id, "credential-test", "COL-001", "2.3"));
+        if (credential.equals("wrong")) request.header("X-Device-Key", "incorrect-key");
+        if (credential.equals("duplicate")) request.header("X-Device-Key", KEY, KEY);
+        if (credential.equals("citizen-jwt")) request.header("Authorization", auth(token));
+        mvc.perform(request).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("INVALID_DEVICE_KEY"));
+        assertThat(jdbc.queryForObject("SELECT status FROM disposals WHERE id=?", String.class, id)).isEqualTo("WAITING_WEIGHT");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM iot_events WHERE event_id='credential-test'", Integer.class)).isZero();
+        // Citizen JWTs are irrelevant when a valid sensor credential is present.
+        mvc.perform(post("/api/v1/iot/events").header("X-Device-Key", KEY).header("Authorization", "Bearer invalid")
+                .contentType(MediaType.APPLICATION_JSON).content(weightPayload(id, "credential-test", "COL-001", "2.3")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.estimatedPoints").value(83));
+    }
+
+    @Test void deviceCredentialCannotAuthorizeAnotherDeviceOrAnIncompatibleDisposal() throws Exception {
+        String token = register(); long id = start(token);
+        mvc.perform(post("/api/v1/iot/events").header("X-Device-Key", KEY).contentType(MediaType.APPLICATION_JSON)
+                .content(weightPayload(id, "device-binding", "COL-004", "2.3")))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("DEVICE_FORBIDDEN"));
+        long incompatible = jdbc.queryForObject("SELECT min(id) FROM disposals WHERE device_id='COL-004'", Long.class);
+        event(mvc, incompatible, "device-binding", "WEIGHT_RECORDED", "2.3")
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM iot_events WHERE event_id='device-binding'", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT status FROM disposals WHERE id=?", String.class, id)).isEqualTo("WAITING_WEIGHT");
+        event(mvc, id, "device-binding", "WEIGHT_RECORDED", "2.3").andExpect(status().isOk());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"disposal", "event-type", "weight"})
+    void reusedEventIdWithDifferentContentCannotChangeTheAcceptedResult(String change) throws Exception {
+        String token = register(); long id = start(token);
+        event(mvc, id, "immutable-event", "WEIGHT_RECORDED", "2.3").andExpect(status().isOk());
+        long changedId = change.equals("disposal") ? id + 100000 : id;
+        String type = change.equals("event-type") ? "DOOR_OPENED" : "WEIGHT_RECORDED";
+        String weight = change.equals("event-type") ? null : change.equals("weight") ? "2.301" : "2.3";
+        event(mvc, changedId, "immutable-event", type, weight).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("EVENT_ID_CONFLICT"));
+        event(mvc, id, "immutable-event", "WEIGHT_RECORDED", "2.300").andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("WAITING_DEPOSIT")).andExpect(jsonPath("$.estimatedPoints").value(83));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM iot_events WHERE event_id='immutable-event'", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT status FROM disposals WHERE id=?", String.class, id)).isEqualTo("WAITING_DEPOSIT");
+        mvc.perform(get("/api/v1/users/me/wallet").header("Authorization", auth(token)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.transactions.length()").value(0));
+    }
+
+    private byte[] image(String format) throws Exception {
+        var output = new ByteArrayOutputStream();
+        assertThat(ImageIO.write(new BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB), format, output)).isTrue();
+        return output.toByteArray();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"missing", "empty", "fake", "truncated", "gif", "oversized"})
+    void invalidPhotosNeverCreateMetadataOrPhysicalFiles(String scenario) throws Exception {
+        String token = register();
+        byte[] contents = switch (scenario) {
+            case "missing", "empty" -> new byte[0];
+            case "fake" -> "not-an-image".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            case "truncated" -> Arrays.copyOf(png(), 24);
+            case "gif" -> image("gif");
+            case "oversized" -> new byte[10 * 1024 * 1024 + 1];
+            default -> throw new IllegalArgumentException(scenario);
+        };
+        int expected = switch (scenario) {
+            case "missing", "empty", "truncated" -> 400;
+            case "fake", "gif" -> 415;
+            default -> 413;
+        };
+        // An image/png declaration and a .png extension cannot make invalid contents acceptable.
+        var request = multipart("/api/v1/uploads");
+        if (!scenario.equals("missing")) request.file(new MockMultipartFile("file", "claim.png", "image/png", contents));
+        request.header("Authorization", auth(token));
+        mvc.perform(request).andExpect(status().is(expected));
+        assertThat(count("uploaded_files")).isEqualTo(10);
+        try (var paths = Files.walk(PHOTO_ROOT)) { assertThat(paths.filter(Files::isRegularFile).count()).isZero(); }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"png", "jpeg"})
+    void realImageFormatControlsMediaTypeAndOnlyItsOwnerCanDownload(String format) throws Exception {
+        String token = register(); String other = register(); byte[] contents = image(format);
+        String id = body(mvc.perform(multipart("/api/v1/uploads")
+                .file(new MockMultipartFile("file", "untrusted.txt", "application/octet-stream", contents))
+                .header("Authorization", auth(token))).andExpect(status().isCreated()).andReturn()).get("photoId").asText();
+        assertThat(jdbc.queryForObject("SELECT content_type FROM uploaded_files WHERE id=?::uuid", String.class, id))
+                .isEqualTo("image/" + format);
+        mvc.perform(get("/api/v1/uploads/" + id).header("Authorization", auth(token)))
+                .andExpect(status().isOk()).andExpect(content().contentType("image/" + format)).andExpect(content().bytes(contents));
+        mvc.perform(get("/api/v1/uploads/" + id).header("Authorization", auth(other))).andExpect(status().isNotFound());
+    }
+
     @Test void initializationGuardCreatesAnEmptyDisposableDatabaseAndRefusesReapplication() throws Exception {
         assertThat(DB.execInContainer("mkdir", "-p", "/opt/reloop").getExitCode()).isZero();
         DB.copyFileToContainer(MountableFile.forHostPath(SQL), "/opt/reloop/database.sql");

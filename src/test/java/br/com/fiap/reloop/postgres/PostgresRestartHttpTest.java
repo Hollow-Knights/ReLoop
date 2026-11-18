@@ -83,6 +83,12 @@ class PostgresRestartHttpTest {
             multipart.write(("--"+boundary+"\r\nContent-Disposition: form-data; name=\"file\"; filename=\"notebook.png\"\r\nContent-Type: image/png\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
             multipart.write(image);multipart.write(("\r\n--"+boundary+"--\r\n").getBytes(StandardCharsets.US_ASCII));
             photo=send("POST","/api/v1/uploads",token,null,null,"multipart/form-data; boundary="+boundary,multipart.toByteArray(),201).get("photoId").asText();
+            var tooLarge=new java.io.ByteArrayOutputStream();
+            tooLarge.write(("--"+boundary+"\r\nContent-Disposition: form-data; name=\"file\"; filename=\"large.png\"\r\nContent-Type: image/png\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+            tooLarge.write(new byte[10*1024*1024+1]);
+            tooLarge.write(("\r\n--"+boundary+"--\r\n").getBytes(StandardCharsets.US_ASCII));
+            assertThat(send("POST","/api/v1/uploads",token,null,null,"multipart/form-data; boundary="+boundary,
+                    tooLarge.toByteArray(),413).get("code").asText()).isEqualTo("FILE_TOO_LARGE");
             id=json("/api/v1/disposals",token,null,Map.of("deviceId","COL-001","categoryId",2,"itemName","Notebook","photoId",photo),201).get("id").asLong();
             assertThat(event(id,"weight","WEIGHT_RECORDED","2.300").get("estimatedPoints").asInt()).isEqualTo(83);
             event(id,"open","DOOR_OPENED",null);event(id,"close","DOOR_CLOSED",null);
