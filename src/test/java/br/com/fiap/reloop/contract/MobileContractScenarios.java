@@ -1,5 +1,7 @@
 package br.com.fiap.reloop.contract;
 
+import br.com.fiap.reloop.support.TestDocuments;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -25,7 +27,7 @@ public final class MobileContractScenarios {
 
     private Account register(String name, String email) throws Exception {
         var registered = body(mvc.perform(post("/api/v1/auth/register").contentType("application/json")
-                .content(JSON.writeValueAsBytes(Map.of("name", name, "email", email, "password", "Mobile123!"))))
+                .content(JSON.writeValueAsBytes(Map.of("name", name, "email", email, "password", "Mobile123!", "document", TestDocuments.next()))))
                 .andExpect(status().isCreated()).andReturn());
         var login = body(mvc.perform(post("/api/v1/auth/login").contentType("application/json")
                 .content(JSON.writeValueAsBytes(Map.of("email", email, "password", "Mobile123!"))))

@@ -1,10 +1,20 @@
 package br.com.fiap.reloop.postgres;
 
+import br.com.fiap.reloop.contract.CpfRegistrationScenarios;
+import br.com.fiap.reloop.user.repository.UserRepository;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.junit.jupiter.api.extension.ExtendWith;
+
+import br.com.fiap.reloop.support.TestDocuments;
+
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import java.util.Base64;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.MockMvcPrint;
@@ -23,7 +33,9 @@ import org.springframework.test.web.servlet.MockMvc;
 @ActiveProfiles("bootstrap")
 @DirtiesContext(classMode=DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 @Import(OpenApiErrorContractConfiguration.class)
+@ExtendWith(OutputCaptureExtension.class)
 class BootstrapRegressionTest {
+    @Autowired UserRepository userRepository;
     @Autowired MockMvc mvc;
     @DynamicPropertySource static void properties(DynamicPropertyRegistry registry) {
         byte[] secret=new byte[32]; new java.security.SecureRandom().nextBytes(secret);
@@ -36,7 +48,7 @@ class BootstrapRegressionTest {
                 .andExpect(jsonPath("$.length()").value(4)).andExpect(jsonPath("$[2].name").value("Pequenos eletrodomésticos"));
         String email=UUID.randomUUID()+"@example.test";
         mvc.perform(post("/api/v1/auth/register").contentType("application/json")
-                .content("{\"name\":\"Bootstrap\",\"email\":\""+email+"\",\"password\":\"Senha123!\"}"))
+                .content("{\"name\":\"Bootstrap\",\"email\":\""+email+"\",\"password\":\"Senha123!\",\"document\":\""+TestDocuments.next()+"\"}"))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.id").value(1));
         mvc.perform(post("/api/v1/auth/login").contentType("application/json")
                 .content("{\"email\":\""+email+"\",\"password\":\"Senha123!\"}"))
@@ -52,7 +64,7 @@ class BootstrapRegressionTest {
         String email=UUID.randomUUID()+"@example.test";
         var mapper=new com.fasterxml.jackson.databind.ObjectMapper();
         mvc.perform(post("/api/v1/auth/register").contentType("application/json")
-                .content(mapper.writeValueAsBytes(java.util.Map.of("name","Bootstrap","email",email,"password","Senha123!"))))
+                .content(mapper.writeValueAsBytes(java.util.Map.of("name","Bootstrap","email",email,"password","Senha123!","document",TestDocuments.next()))))
                 .andExpect(status().isCreated());
         var login=mvc.perform(post("/api/v1/auth/login").contentType("application/json")
                 .content(mapper.writeValueAsBytes(java.util.Map.of("email",email,"password","Senha123!"))))
@@ -102,6 +114,18 @@ class BootstrapRegressionTest {
     }
     @Test void mobilePointDistancesAreNumericStableAndConsistent() throws Exception {
         new MobileContractScenarios(mvc).everyPointHasTheSameStableNumericDistanceInListAndDetail();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"missing", "null", "empty", "short", "long", "letters", "repeated", "checksum", "punctuation", "spaces", "number", "boolean"})
+    void invalidCpfCannotCreateAnAccount(String scenario) throws Exception {
+        new CpfRegistrationScenarios(mvc, userRepository).invalidDocument(scenario);
+    }
+    @Test void validCpfIsNormalizedPrivateAndSurvivesProfileUpdates(CapturedOutput output) throws Exception {
+        new CpfRegistrationScenarios(mvc, userRepository).normalizedPrivateAndDistinct(output);
+    }
+    @Test void duplicateCpfIsNormalizedAndDoesNotLeak(CapturedOutput output) throws Exception {
+        new CpfRegistrationScenarios(mvc, userRepository).duplicateIsSafeAndNormalized(output);
     }
 
 }

@@ -25,11 +25,14 @@ public class UserService {
         this.currentUser = currentUser;
     }
 
-    public UserResponse register(String name, String email, String passwordHash) {
+    public UserResponse register(String name, String email, String passwordHash, String document) {
         try {
-            return UserResponse.from(users.create(name.strip(), normalizeEmail(email), passwordHash));
+            String normalizedDocument = document.replace(".", "").replace("-", "");
+            return UserResponse.from(users.create(name.strip(), normalizeEmail(email), passwordHash, normalizedDocument));
         } catch (UserRepository.EmailAlreadyInUse conflict) {
             throw emailConflict();
+        } catch (UserRepository.DocumentAlreadyInUse conflict) {
+            throw new ApiException(HttpStatus.CONFLICT, "DOCUMENT_ALREADY_IN_USE", "CPF já cadastrado.");
         }
     }
 

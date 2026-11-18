@@ -1,5 +1,7 @@
 package br.com.fiap.reloop.postgres;
 
+import br.com.fiap.reloop.support.TestDocuments;
+
 import static org.assertj.core.api.Assertions.*;
 import java.net.URI;
 import java.net.http.*;
@@ -27,7 +29,9 @@ class PostgresRestartHttpTest {
     @SuppressWarnings("resource")
     @Container static final PostgreSQLContainer<?> DB=new PostgreSQLContainer<>("postgres:16.11-alpine3.23")
             .withCopyFileToContainer(MountableFile.forHostPath(Path.of("database/schema/database.sql").toAbsolutePath()),
-                    "/docker-entrypoint-initdb.d/01-hiago.sql");
+                    "/docker-entrypoint-initdb.d/01-hiago.sql")
+            .withCopyFileToContainer(MountableFile.forHostPath(Path.of("database/migrations/V001__add_user_document.sql").toAbsolutePath()),
+                    "/docker-entrypoint-initdb.d/02-user-document.sql");
     private final HttpClient http=HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(10)).build();
     private final ObjectMapper mapper=new ObjectMapper();
     private static final String PASSWORD="Senha123!";
@@ -72,10 +76,11 @@ class PostgresRestartHttpTest {
         properties.put("reloop.photo.storage-dir",files.toString());properties.put("reloop.photo.base-url","http://localhost:8080");
         properties.put("server.address","127.0.0.1");properties.put("server.port",0);properties.put("spring.main.banner-mode","off");
         properties.put("logging.level.root","WARN");
+        String document=TestDocuments.next();
         String email=UUID.randomUUID()+"@example.test";long id;String photo;JsonNode originalCoupon;
         byte[] image;
         try(var application=start(properties)) {
-            json("/api/v1/auth/register",null,null,Map.of("name","Restart","email",email,"password",PASSWORD),201);
+            json("/api/v1/auth/register",null,null,Map.of("name","Restart","email",email,"password",PASSWORD,"document",document),201);
             String token=login(email);
             var output=new java.io.ByteArrayOutputStream();
             javax.imageio.ImageIO.write(new java.awt.image.BufferedImage(2,2,java.awt.image.BufferedImage.TYPE_INT_RGB),"png",output);
@@ -100,6 +105,13 @@ class PostgresRestartHttpTest {
         // The previous server, entity manager factory and connection pool have all been closed.
         try(var restarted=start(properties)) {
             String token=login(email);
+            assertThat(restarted.getBean(org.springframework.jdbc.core.JdbcTemplate.class)
+                    .queryForObject("SELECT document FROM users WHERE email=?", String.class, email)).isEqualTo(document);
+            var conflict=json("/api/v1/auth/register",null,null,Map.of("name","Duplicate","email","duplicate@example.test",
+                    "password",PASSWORD,"document",TestDocuments.formatted(document)),409);
+            assertThat(conflict.path("code").asText()).isEqualTo("DOCUMENT_ALREADY_IN_USE");
+            assertThat(conflict.toString()).doesNotContain(document,TestDocuments.formatted(document));
+
             var download=http.send(HttpRequest.newBuilder(URI.create(base+"/api/v1/uploads/"+photo))
                     .header("Authorization","Bearer "+token).GET().build(),HttpResponse.BodyHandlers.ofByteArray());
             assertThat(download.statusCode()).isEqualTo(200);assertThat(download.body()).isEqualTo(image);

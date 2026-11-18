@@ -75,12 +75,15 @@ No perfil `bootstrap`, cadastro, login e as três consultas do catálogo são
 públicos. Perfil, fotos, descartes, carteira e recompensas exigem
 `Authorization: Bearer <token>`.
 O simulador IoT usa `X-Device-Key`.
+Novos cadastros exigem `document` com CPF válido, com ou sem máscara. Ele é
+normalizado para 11 dígitos, único por conta e não é retornado no perfil/JWT.
+O CPF dos exemplos é gerado para demonstração, sem origem em dados de pessoas.
 
 ```sh
 base_url=http://localhost:8080
 curl -fsS "$base_url/api/v1/auth/register" \
   -H 'Content-Type: application/json' \
-  -d '{"name":"João Pedro","email":"joao@example.com","password":"Senha123!"}'
+  -d '{"name":"João Pedro","email":"joao@example.com","password":"Senha123!","document":"70000000159"}'
 curl -fsS "$base_url/api/v1/auth/login" \
   -H 'Content-Type: application/json' \
   -d '{"email":"joao@example.com","password":"Senha123!"}'
@@ -348,7 +351,7 @@ unidade. A carteira, o catálogo e os resgates ficam em memória no
 O perfil `postgres` usa o [SQL original do Hiago](database/schema/database.sql),
 Spring Data JPA, transações reais e armazenamento durável de fotografias.
 Mantém as rotas da main: upload separado, criação de descarte com `photoId`,
-perfil em `/api/v1/users/me` e resgates em `/api/v1/rewards/{id}/redeem`.
+perfil em `/api/v1/user` (também `/api/v1/users/me`) e resgates em `/api/v1/rewards/{id}/redeem`.
 
 Leia o [guia de integração PostgreSQL](docs/database/postgres-integration.md)
 para criar o banco uma única vez com Docker Compose, configurar o `.env`
@@ -360,7 +363,11 @@ O inicializador aguarda o healthcheck TCP do banco, com limite padrão de
 60 segundos (`POSTGRES_INIT_TIMEOUT_SECONDS`, exportada no shell). Falha ou
 timeout interrompe a operação antes de executar SQL. Use-o somente em banco
 vazio; para bancos já preenchidos, inicie apenas o serviço com
-`docker compose up -d --wait --wait-timeout 60 postgres` e execute o backend.
+`docker compose up -d --wait --wait-timeout 60 postgres`.
+Antes desta versão, aplique explicitamente a migração
+[V001 de CPF](database/migrations/README.md) uma vez, tanto após o esquema original
+em instalações novas quanto em bancos existentes. O backend não migra o banco
+automaticamente; usuários legados mantêm CPF nulo. Depois inicie a aplicação.
 
 Os catálogos diferem entre os perfis. No SQL, o exemplo testado é Notebook,
 categoria 2, peso 2,300 kg, crédito 83, resgate de 80 e saldo 3. Os hashes e
@@ -381,7 +388,7 @@ Com Java 21 e Docker Desktop ativo:
 Os testes usam PostgreSQL real em contêineres descartáveis e um diretório de
 fotos temporário. Não precisam de `.env`, banco criado manualmente ou JWT
 externo. Incluem concorrência, rollback e reinício com HTTP real, além da
-regressão bootstrap. Após a auditoria, a suíte tem 65 testes, incluindo leitura
+regressão bootstrap. Após o cadastro com CPF, a suíte tem 138 testes, preservando os 103 anteriores, incluindo leitura
 consistente de carteira, estados de conclusão de upload, inicialização limitada
 e casos negativos de JWT, IoT e fotografias. Os relatórios ficam em
 `target/surefire-reports`. Veja as [correções da auditoria](docs/database/postgres-audit-fixes.md).

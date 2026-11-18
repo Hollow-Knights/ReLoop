@@ -1,5 +1,13 @@
 package br.com.fiap.reloop.postgres;
 
+import br.com.fiap.reloop.contract.CpfRegistrationScenarios;
+import br.com.fiap.reloop.user.repository.UserRepository;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.junit.jupiter.api.extension.ExtendWith;
+
+import br.com.fiap.reloop.support.TestDocuments;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -48,7 +56,10 @@ import org.testcontainers.utility.MountableFile;
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Import(OpenApiErrorContractConfiguration.class)
+@ExtendWith(OutputCaptureExtension.class)
 class PostgresIntegrationTest {
+    @Autowired UserRepository userRepository;
+    @Autowired br.com.fiap.reloop.security.JwtService jwtTokens;
     private static final String PASSWORD = "Senha123!";
     private static final String KEY = UUID.randomUUID().toString();
     private static final String SECRET = secret();
@@ -57,7 +68,9 @@ class PostgresIntegrationTest {
     // JUnit/Testcontainers owns the lifecycle of this static @Container.
     @SuppressWarnings("resource")
     @Container static final PostgreSQLContainer<?> DB = new PostgreSQLContainer<>("postgres:16.11-alpine3.23")
-            .withCopyFileToContainer(MountableFile.forHostPath(SQL), "/docker-entrypoint-initdb.d/01-hiago.sql");
+            .withCopyFileToContainer(MountableFile.forHostPath(SQL), "/docker-entrypoint-initdb.d/01-hiago.sql")
+            .withCopyFileToContainer(MountableFile.forHostPath(Path.of("database/migrations/V001__add_user_document.sql").toAbsolutePath()),
+                    "/docker-entrypoint-initdb.d/02-user-document.sql");
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper mapper;
     @Autowired JdbcTemplate jdbc;
@@ -102,7 +115,7 @@ class PostgresIntegrationTest {
     private String register() throws Exception { return register(UUID.randomUUID() + "@example.test"); }
     private String register(String email) throws Exception {
         mvc.perform(post("/api/v1/auth/register").contentType(MediaType.APPLICATION_JSON)
-                .content(json(Map.of("name", "Teste", "email", email, "password", PASSWORD))))
+                .content(json(Map.of("name", "Teste", "email", email, "password", PASSWORD, "document", TestDocuments.next()))))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.passwordHash").doesNotExist());
         return login(mvc, email);
     }
@@ -226,7 +239,7 @@ class PostgresIntegrationTest {
                 .andExpect(jsonPath("$.email").value(email.toLowerCase())).andExpect(jsonPath("$.id").isNumber())
                 .andExpect(jsonPath("$.userPoints").doesNotExist());
         mvc.perform(post("/api/v1/auth/register").contentType(MediaType.APPLICATION_JSON)
-                .content(json(Map.of("name", "Duplicate", "email", email.toLowerCase(), "password", PASSWORD))))
+                .content(json(Map.of("name", "Duplicate", "email", email.toLowerCase(), "password", PASSWORD, "document", TestDocuments.next()))))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("EMAIL_ALREADY_IN_USE"));
         for (String account : List.of(email, "ana.souza@email.com", "unknown@example.test"))
             mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
@@ -613,7 +626,7 @@ class PostgresIntegrationTest {
         String email = UUID.randomUUID() + "@example.test";
         String token = register(email);
         safeError(mvc.perform(post("/api/v1/auth/register").contentType("application/json")
-                .content(json(Map.of("name", "Duplicado", "email", email.toUpperCase(Locale.ROOT), "password", PASSWORD)))),
+                .content(json(Map.of("name", "Duplicado", "email", email.toUpperCase(Locale.ROOT), "password", PASSWORD, "document", TestDocuments.next())))),
                 409, "EMAIL_ALREADY_IN_USE", "E-mail já cadastrado.");
         safeError(mvc.perform(post("/api/v1/auth/login").contentType("application/json")
                 .content(json(Map.of("email", email, "password", "errada")))),
@@ -774,6 +787,112 @@ class PostgresIntegrationTest {
     }
     @Test void mobilePointDistancesAreNumericStableAndConsistent() throws Exception {
         new MobileContractScenarios(mvc).everyPointHasTheSameStableNumericDistanceInListAndDetail();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"missing", "null", "empty", "short", "long", "letters", "repeated", "checksum", "punctuation", "spaces", "number", "boolean"})
+    void invalidCpfCannotCreateAnAccount(String scenario) throws Exception {
+        new CpfRegistrationScenarios(mvc, userRepository).invalidDocument(scenario);
+    }
+    @Test void validCpfIsNormalizedPrivateAndSurvivesProfileUpdates(CapturedOutput output) throws Exception {
+        new CpfRegistrationScenarios(mvc, userRepository).normalizedPrivateAndDistinct(output);
+    }
+    @Test void duplicateCpfIsNormalizedAndDoesNotLeak(CapturedOutput output) throws Exception {
+        new CpfRegistrationScenarios(mvc, userRepository).duplicateIsSafeAndNormalized(output);
+    }
+    @Test void concurrentDuplicateCpfCreatesExactlyOneUserAndWallet(CapturedOutput output) throws Exception {
+        String document = TestDocuments.next();
+        var attempts = new java.util.concurrent.atomic.AtomicInteger();
+        var responses = together(6, () -> {
+            var payload = CpfRegistrationScenarios.request(attempts.incrementAndGet() % 2 == 0
+                    ? document : TestDocuments.formatted(document));
+            return mvc.perform(post("/api/v1/auth/register").contentType("application/json").content(json(payload)))
+                    .andReturn().getResponse();
+        });
+        assertThat(responses.stream().filter(r -> r.getStatus() == 201).count()).isEqualTo(1);
+        assertThat(responses.stream().filter(r -> r.getStatus() == 409).count()).isEqualTo(5);
+        for (var response : responses) {
+            assertThat(response.getContentAsString()).doesNotContain(document, TestDocuments.formatted(document));
+            if (response.getStatus() == 409) {
+                var error = mapper.readTree(response.getContentAsByteArray());
+                assertThat(error.path("code").asText()).isEqualTo("DOCUMENT_ALREADY_IN_USE");
+                assertThat(error.path("message").asText()).isEqualTo("CPF já cadastrado.");
+            }
+        }
+        assertThat(count("users")).isEqualTo(6);
+        assertThat(count("wallets")).isEqualTo(6);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM users WHERE document=?", Integer.class, document)).isEqualTo(1);
+        assertThat(output.getAll()).doesNotContain(document, TestDocuments.formatted(document));
+    }
+
+    @Test void documentIndexAndCheckProtectDirectDatabaseWrites(CapturedOutput output) {
+        String document = TestDocuments.next();
+        jdbc.update("UPDATE users SET document=? WHERE id=1", document);
+        assertThatThrownBy(() -> jdbc.update("UPDATE users SET document=? WHERE id=2", document))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        for (String invalid : List.of("123", "11111111111", "1234567890x", TestDocuments.formatted(document))) {
+            assertThatThrownBy(() -> jdbc.update("UPDATE users SET document=? WHERE id=2", invalid))
+                    .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        }
+        assertThat(jdbc.queryForObject("SELECT document FROM users WHERE id=2", String.class)).isNull();
+        assertThat(output.getAll()).doesNotContain(document, TestDocuments.formatted(document));
+    }
+
+    @Test void failedWalletCreationRollsBackUserAndCpfAndAllowsRetry(CapturedOutput output) throws Exception {
+        String document = TestDocuments.next();
+        var payload = CpfRegistrationScenarios.request(document);
+        rejectWrites("test_reject_new_wallet", "wallets", "NEW.user_id > 5");
+        try {
+            safeError(mvc.perform(post("/api/v1/auth/register").contentType("application/json").content(json(payload))),
+                    500, "INTERNAL_SERVER_ERROR", "Não foi possível concluir a operação.");
+            assertThat(count("users")).isEqualTo(5);
+            assertThat(count("wallets")).isEqualTo(5);
+            assertThat(userRepository.findByEmail(payload.get("email").toString())).isEmpty();
+        } finally { removeRejection("test_reject_new_wallet", "wallets"); }
+        mvc.perform(post("/api/v1/auth/register").contentType("application/json").content(json(payload)))
+                .andExpect(status().isCreated());
+        assertThat(count("users")).isEqualTo(6);
+        assertThat(count("wallets")).isEqualTo(6);
+        assertThat(userRepository.findByEmail(payload.get("email").toString()).orElseThrow().document()).isEqualTo(document);
+        assertThat(output.getAll()).doesNotContain(document);
+    }
+
+    @Test void migrationPreservesLegacyUsersAndRollsBackPartialOrRepeatedApplication() throws Exception {
+        String database = "cpf_migration_" + UUID.randomUUID().toString().replace("-", "");
+        assertThat(DB.execInContainer("createdb", "-U", DB.getUsername(), database).getExitCode()).isZero();
+        DB.copyFileToContainer(MountableFile.forHostPath(SQL), "/tmp/cpf-original-schema.sql");
+        DB.copyFileToContainer(MountableFile.forHostPath(Path.of("database/migrations/V001__add_user_document.sql").toAbsolutePath()),
+                "/tmp/cpf-migration.sql");
+        assertThat(DB.execInContainer("psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", DB.getUsername(), "-d", database,
+                "-f", "/tmp/cpf-original-schema.sql").getExitCode()).isZero();
+        String before = migrationQuery(database, "SELECT md5(jsonb_agg(to_jsonb(u) ORDER BY id)::text) FROM users u");
+        // Force a failure AFTER ADD COLUMN: the entire migration must roll back without touching old rows.
+        migrationQuery(database, "CREATE INDEX ux_users_document ON users(name)");
+        assertThat(DB.execInContainer("psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", DB.getUsername(), "-d", database,
+                "-f", "/tmp/cpf-migration.sql").getExitCode()).isEqualTo(3);
+        assertThat(migrationQuery(database, "SELECT count(*) FROM information_schema.columns WHERE table_name='users' AND column_name='document'"))
+                .isEqualTo("0");
+        migrationQuery(database, "DROP INDEX ux_users_document");
+        assertThat(DB.execInContainer("psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", DB.getUsername(), "-d", database,
+                "-f", "/tmp/cpf-migration.sql").getExitCode()).isZero();
+        assertThat(migrationQuery(database, "SELECT md5(jsonb_agg(to_jsonb(u)-'document' ORDER BY id)::text) FROM users u"))
+                .isEqualTo(before);
+        assertThat(migrationQuery(database, "SELECT count(*) FROM users WHERE document IS NULL")).isEqualTo("5");
+        assertThat(DB.execInContainer("psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", DB.getUsername(), "-d", database,
+                "-f", "/tmp/cpf-migration.sql").getExitCode()).isEqualTo(3);
+        assertThat(migrationQuery(database, "SELECT count(*) FROM users WHERE document IS NULL")).isEqualTo("5");
+        // Both domain reads and authenticated profiles still accept a legacy account with NULL CPF.
+        assertThat(userRepository.findById(1L).orElseThrow().document()).isNull();
+        mvc.perform(get("/api/v1/user").header("Authorization", auth(jwtTokens.issue(1L).accessToken())))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.document").doesNotExist());
+
+    }
+
+    private String migrationQuery(String database, String query) throws Exception {
+        var result = DB.execInContainer("psql", "-X", "-v", "ON_ERROR_STOP=1", "-At", "-U", DB.getUsername(), "-d", database, "-c", query);
+        assertThat(result.getExitCode()).isZero();
+        return result.getStdout().strip();
     }
 
 }

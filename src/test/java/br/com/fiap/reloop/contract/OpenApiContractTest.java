@@ -73,6 +73,20 @@ class OpenApiContractTest {
         assertThat(detailExample).isEqualTo(listExample);
     }
 
+    @Test void registrationRequiresPrivateCpfAndDocumentsItsOwnErrors() {
+        JsonNode request = DOCUMENT.at("/components/schemas/RegisterRequest");
+        assertThat(request.path("required")).anySatisfy(field -> assertThat(field.asText()).isEqualTo("document"));
+        JsonNode document = resolve(request.at("/properties/document"));
+        assertThat(document.path("type").asText()).isEqualTo("string");
+        assertThat(document.path("writeOnly").asBoolean()).isTrue();
+        assertThat(document.path("description").asText()).contains("CPF", "verificadores", "11 dígitos");
+        assertThat(DOCUMENT.at("/components/schemas/ProfileResponse/properties").has("document")).isFalse();
+        var errors = resolve(DOCUMENT.at("/paths/~1api~1v1~1auth~1register/post/responses/409"))
+                .at("/content/application~1json/examples");
+        assertThat(resolve(errors.path("DocumentAlreadyInUse")).at("/value/code").asText()).isEqualTo("DOCUMENT_ALREADY_IN_USE");
+        assertThat(errors.has("EmailAlreadyInUse")).isTrue();
+    }
+
     @ParameterizedTest(name = "{1} {0}: response examples and authentication")
     @MethodSource("operations")
     void everyOperationHasContextualResponseExamples(String path, String method, JsonNode operation) {

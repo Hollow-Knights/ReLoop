@@ -29,6 +29,8 @@ public final class DatabaseRows {
         public String email;
         @Column(name = "password_hash", nullable = false, columnDefinition = "text")
         public String passwordHash;
+        @Column(name = "document", length = 11)
+        public String document;
         @Column(name = "created_at", nullable = false)
         public Instant createdAt;
         @Column(name = "updated_at", nullable = false)

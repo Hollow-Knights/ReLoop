@@ -141,6 +141,10 @@ set -a
 set +a
 # Somente na primeira execução, com o banco vazio:
 ./scripts/init-postgres.sh
+# Após criar o esquema original, aplique V001 uma vez; consulte database/migrations/README.md.
+docker compose exec -T postgres sh -c \
+  'exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+  < database/migrations/V001__add_user_document.sql
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres
 ```
 
@@ -164,11 +168,17 @@ persistente novo na máquina do usuário durante esta tarefa.
 Não existe Flyway/Liquibase na base main. A estratégia desta entrega é o
 SQL original aplicado **uma vez**, com `spring.sql.init.mode=never` e
 `ddl-auto=validate`. Nenhum DDL é executado pelo backend ao iniciar, e a
-carga em memória não é ativada no perfil postgres. Mudanças futuras de DDL
-precisarão de migrações versionadas acordadas com Hiago; não se deve reaplicar
-o arquivo inicial sobre dados existentes.
+carga em memória não é ativada no perfil postgres. O cadastro com CPF adiciona a migração manual versionada
+[V001](../../database/migrations/README.md), sem alterar o original. Ela precisa
+ser aplicada explicitamente uma vez antes de iniciar esta versão, inclusive em
+bancos já preenchidos; mantém CPF NULL para os cinco usuários legados. Não foi
+aplicada ao banco local durante o desenvolvimento. DDL futuro deve continuar
+versionado e coordenado; não reaplique o arquivo inicial sobre dados existentes.
 
-Se o banco já estiver preenchido, **não execute o inicializador**. Com as
+Se o banco já estiver preenchido, **não execute o inicializador**.
+Antes de usar esta versão pela primeira vez, aplique V001 seguindo o guia de
+migrações, mediante autorização do responsável pelo banco. Nas próximas execuções,
+não a reaplique. Com as
 variáveis do `.env` exportadas, as próximas subidas usam somente:
 
 ```sh
@@ -196,15 +206,20 @@ A base original é recarregada entre os métodos nos bancos descartáveis.
 
 | Classe | Execuções | Verificações |
 | --- | ---: | --- |
-| `PostgresIntegrationTest` | 49 | Jornada e regressões anteriores; carteira consistente com resgate entre consultas; JWT ausente/malformado/expirado/assinatura e emissor incorretos/sem assinatura; isolamento; credenciais e payloads IoT; fotos ausentes/vazias/falsas/truncadas/GIF/grandes; PNG/JPEG; inicialização e rejeição da reaplicação em banco Testcontainers. |
+| `PostgresIntegrationTest` | 77 | Jornada e regressões anteriores; carteira consistente com resgate entre consultas; JWT ausente/malformado/expirado/assinatura e emissor incorretos/sem assinatura; isolamento; credenciais e payloads IoT; fotos ausentes/vazias/falsas/truncadas/GIF/grandes; PNG/JPEG; inicialização e rejeição da reaplicação em banco Testcontainers. |
 | `PostgresRestartHttpTest` | 1 | HTTP real/Tomcat, rejeição 413 de upload grande, encerramento completo, nova aplicação e recuperação de foto, usuário, carteira, eventos e cupom. |
-| `BootstrapRegressionTest` | 3 | Health, catálogo, cadastro/login, precisão e jornada completa com crédito/resgate/replays. Cada método tem contexto próprio. |
+| `BootstrapRegressionTest` | 21 | Health, catálogo, cadastro/login, precisão e jornada completa com crédito/resgate/replays. Cada método tem contexto próprio. |
 | `PhotoCompletionTest` | 3 | Callback de commit, rollback e resultado desconhecido, com bytes reais e store simulado; retenção/limpeza e aviso de reconciliação. |
 | `PostgresInitializationScriptTest` | 9 | Script real com Docker CLI simulado: espera saudável com limite, timeout configurável, falha sem executar SQL, propagação de erro de banco preenchido e cinco valores inválidos de timeout. |
 
-Resultado em Java 21 após as correções: **65 testes, 65 passaram, zero falhas,
+Além das regressões anteriores, `OpenApiContractTest` executa 25 verificações de
+contrato e `UserDocumentPrivacyTest` executa duas de privacidade/rollback em memória.
+Os cenários de CPF cobrem ambos os perfis, zeros iniciais, normalização, formatos
+inválidos, duplicidade, concorrência, migração de legados e reinicialização.
+
+Resultado em Java 21 após o Bloco CPF: **138 testes, 138 passaram, zero falhas,
 erros ou ignorados; BUILD SUCCESS** (`./mvnw clean verify`). Os relatórios estão
-em `target/surefire-reports`. Os 27 testes anteriores foram preservados.
+em `target/surefire-reports`. Os 103 testes anteriores ao Bloco CPF foram preservados.
 
 O teste da carteira intercala consultas e resgate usando latches, sem sleeps.
 Com o comportamento anterior `READ COMMITTED`, ele foi executado e falhou:

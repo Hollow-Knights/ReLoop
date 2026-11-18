@@ -45,6 +45,8 @@ paths:
         como hash. No bootstrap, o cadastro também abre uma carteira em
         memória com saldo zero. No postgres, usuário e carteira são persistidos
         na mesma transação.
+        document é um CPF obrigatório, validado e normalizado para 11 dígitos.
+        Não é retornado no perfil nem incluído no JWT; duplicidade retorna 409.
       security: []
       requestBody:
         required: true
@@ -52,6 +54,21 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/RegisterRequest'
+            examples:
+              semPontuacao:
+                summary: CPF sintético gerado para demonstração, sem pontuação.
+                value:
+                  name: Ana Silva
+                  email: ana@example.com
+                  password: Senha123!
+                  document: '70000000159'
+              comPontuacao:
+                summary: O mesmo formato também aceita a máscara de CPF.
+                value:
+                  name: Ana Silva
+                  email: ana@example.com
+                  password: Senha123!
+                  document: 700.000.001-59
       responses:
         '201':
           description: Usuário cadastrado.
@@ -63,9 +80,9 @@ paths:
                 Profile:
                   $ref: '#/components/examples/Profile'
         '400':
-          $ref: '#/components/responses/EmailBadRequest'
+          $ref: '#/components/responses/RegistrationBadRequest'
         '409':
-          $ref: '#/components/responses/EmailConflict'
+          $ref: '#/components/responses/RegistrationConflict'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '500':
@@ -692,6 +709,32 @@ components:
         $ref: '#/components/schemas/EntityId'
 
   responses:
+    RegistrationBadRequest:
+      description: Dados inválidos, inclusive CPF ausente, nulo, formato ou dígitos verificadores
+        inválidos. A mensagem HTTP de validação permanece genérica.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            ValidationError:
+              $ref: '#/components/examples/ValidationError'
+            EmailTooLong:
+              $ref: '#/components/examples/EmailTooLong'
+            InvalidDocument:
+              $ref: '#/components/examples/InvalidDocument'
+    RegistrationConflict:
+      description: E-mail normalizado ou CPF já cadastrado, inclusive em cadastros concorrentes.
+        Nenhum dado pessoal é devolvido no conflito.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            EmailAlreadyInUse:
+              $ref: '#/components/examples/EmailAlreadyInUse'
+            DocumentAlreadyInUse:
+              $ref: '#/components/examples/DocumentAlreadyInUse'
     BadRequest:
       description: Entrada ausente, malformada ou inválida. A validação HTTP retorna a mensagem genérica Bad Request.
       content:
@@ -1010,6 +1053,21 @@ components:
             MissingDisposalCategory:
               $ref: '#/components/examples/MissingDisposalCategory'
   examples:
+    InvalidDocument:
+      summary: CPF obrigatório ausente/nulo, formato incorreto, sequência repetida ou
+        dígitos verificadores inválidos.
+      value:
+        status: 400
+        code: BAD_REQUEST
+        message: Bad Request
+        timestamp: '2026-11-18T17:00:00Z'
+    DocumentAlreadyInUse:
+      summary: CPF já associado a uma conta, com ou sem pontuação na entrada.
+      value:
+        status: 409
+        code: DOCUMENT_ALREADY_IN_USE
+        message: CPF já cadastrado.
+        timestamp: '2026-11-18T17:00:00Z'
     ValidationError:
       summary: JSON malformado, campos ausentes, validação de campos ou parâmetros.
       value:
@@ -1519,9 +1577,19 @@ components:
         timestamp:
           $ref: '#/components/schemas/UtcTimestamp'
 
+    CpfDocument:
+      type: string
+      writeOnly: true
+      pattern: ^(?:[0-9]{11}|[0-9]{3}\.[0-9]{3}\.[0-9]{3}-[0-9]{2})$
+      description: CPF brasileiro obrigatório para novos cadastros, com dígitos verificadores
+        válidos e sem sequências repetidas. Aceita somente 11 dígitos ou máscara 000.000.000-00,
+        sem espaços. Normalizado para 11 dígitos e único por conta. Não é retornado no
+        cadastro/perfil nem incluído no JWT. Usuários legados podem manter CPF nulo internamente.
+      example: '70000000159'
+
     RegisterRequest:
       type: object
-      required: [name, email, password]
+      required: [name, email, password, document]
       properties:
         name:
           $ref: '#/components/schemas/UserName'
@@ -1533,6 +1601,9 @@ components:
           minLength: 8
           maxLength: 256
           writeOnly: true
+        document:
+          $ref: '#/components/schemas/CpfDocument'
+
     LoginRequest:
       type: object
       required: [email, password]
