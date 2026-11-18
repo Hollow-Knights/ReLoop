@@ -66,9 +66,7 @@ public final class OpenApiContract {
         String method = result.getRequest().getMethod().toLowerCase(java.util.Locale.ROOT);
         String uri = result.getRequest().getRequestURI();
         JsonNode operation = null;
-        var paths = DOCUMENT.path("paths").fields();
-        while (paths.hasNext()) {
-            var path = paths.next();
+        for (var path : DOCUMENT.path("paths").properties()) {
             if (PATHS.match(path.getKey(), uri) && path.getValue().has(method)) {
                 operation = path.getValue().get(method);
                 break;

@@ -16,7 +16,7 @@ class OpenApiContractTest {
 
     static Stream<Arguments> operations() {
         var operations = Stream.<Arguments>builder();
-        DOCUMENT.path("paths").fields().forEachRemaining(path -> path.getValue().fields().forEachRemaining(method -> {
+        DOCUMENT.path("paths").properties().forEach(path -> path.getValue().properties().forEach(method -> {
             if (METHODS.contains(method.getKey())) operations.add(Arguments.of(path.getKey(), method.getKey(), method.getValue()));
         }));
         return operations.build();
@@ -46,9 +46,7 @@ class OpenApiContractTest {
     @ParameterizedTest(name = "{1} {0}: response examples and authentication")
     @MethodSource("operations")
     void everyOperationHasContextualResponseExamples(String path, String method, JsonNode operation) {
-        var responses = operation.path("responses").fields();
-        while (responses.hasNext()) {
-            var entry = responses.next();
+        for (var entry : operation.path("responses").properties()) {
             int status = Integer.parseInt(entry.getKey());
             JsonNode response = resolve(entry.getValue());
             assertThat(response.path("description").asText()).isNotBlank();
