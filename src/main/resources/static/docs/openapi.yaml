@@ -15,6 +15,8 @@ info:
     dois usuários.
     O Swagger UI disponibiliza os modelos para consulta. O health check está
     disponível em `/actuator/health`.
+    Os exemplos são ilustrativos; IDs e dados variam entre perfis. Respostas de erro
+    trazem exemplos por causa, sem expor valores recebidos ou detalhes internos.
     Os campos JSON usam camelCase. Datas são emitidas em UTC no formato ISO 8601.
 servers:
   - url: /
@@ -57,14 +59,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProfileResponse'
+              examples:
+                Profile:
+                  $ref: '#/components/examples/Profile'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/EmailBadRequest'
         '409':
-          description: E-mail já cadastrado (EMAIL_ALREADY_IN_USE).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
+          $ref: '#/components/responses/EmailConflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -88,14 +91,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TokenResponse'
+              examples:
+                Token:
+                  $ref: '#/components/examples/Token'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/EmailBadRequest'
         '401':
-          description: Credenciais inválidas (INVALID_CREDENTIALS).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
+          $ref: '#/components/responses/InvalidCredentials'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -111,10 +115,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProfileResponse'
+              examples:
+                Profile:
+                  $ref: '#/components/examples/Profile'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/IdentityUnauthorized'
         '500':
           $ref: '#/components/responses/InternalError'
+
     put:
       tags: [Usuários]
       operationId: updateMyProfile
@@ -133,16 +141,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProfileResponse'
+              examples:
+                Profile:
+                  $ref: '#/components/examples/Profile'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/EmailBadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/IdentityUnauthorized'
         '409':
-          description: E-mail em uso por outro usuário (EMAIL_ALREADY_IN_USE).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
+          $ref: '#/components/responses/EmailConflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -152,6 +161,7 @@ paths:
       operationId: listCollectionPoints
       summary: Listar pontos de coleta (implementado no bootstrap e postgres)
       description: Nos perfis bootstrap e postgres, a consulta funciona sem JWT e retorna [] quando a lista está vazia.
+      security: []
       responses:
         '200':
           description: Locais de coleta.
@@ -161,8 +171,9 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/CollectionPointResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+              examples:
+                CollectionPoints:
+                  $ref: '#/components/examples/CollectionPoints'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -174,6 +185,7 @@ paths:
       operationId: getCollectionPoint
       summary: Consultar ponto de coleta, categorias aceitas e coletores (implementado no bootstrap e postgres)
       description: Nos perfis bootstrap e postgres, a consulta funciona sem JWT. Um ID positivo inexistente retorna 404.
+      security: []
       responses:
         '200':
           description: Detalhes do local.
@@ -181,10 +193,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CollectionPointDetailResponse'
+              examples:
+                CollectionPoint:
+                  $ref: '#/components/examples/CollectionPoint'
         '400':
           $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -200,6 +213,7 @@ paths:
         armazenados no catálogo. Ao receber a pesagem, o backend valida
         o peso no intervalo inclusivo da categoria e calcula
         `min(maxPoints, roundHalfUp(basePoints + weightKg * pointsPerKg))`.
+      security: []
       responses:
         '200':
           description: Categorias disponíveis.
@@ -209,8 +223,9 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/ElectronicCategoryResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+              examples:
+                Categories:
+                  $ref: '#/components/examples/Categories'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -239,24 +254,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UploadResponse'
+              examples:
+                Upload:
+                  $ref: '#/components/examples/Upload'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/UploadBadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '413':
-          description: Arquivo maior que o limite (FILE_TOO_LARGE).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
+          $ref: '#/components/responses/FileTooLarge'
         '415':
-          description: Tipo de mídia incompatível (UNSUPPORTED_MEDIA_TYPE).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
+          $ref: '#/components/responses/PhotoUnsupportedMediaType'
         '500':
-          $ref: '#/components/responses/InternalError'
+          $ref: '#/components/responses/UploadInternalError'
 
   /api/v1/uploads/{photoId}:
     get:
@@ -293,7 +303,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/PhotoNotFound'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -320,28 +330,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DisposalResponse'
+              examples:
+                WaitingDisposal:
+                  $ref: '#/components/examples/WaitingDisposal'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
-          description: Coletor ou categoria inexistente, ou foto inexistente ou de outro usuário (RESOURCE_NOT_FOUND).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
+          $ref: '#/components/responses/CreationNotFound'
         '409':
-          description: Foto já associada (PHOTO_ALREADY_LINKED), coletor ocupado ou coletor ou ponto de coleta inativo (DEVICE_UNAVAILABLE).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
+          $ref: '#/components/responses/CreationConflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
         '422':
-          description: O ponto de coleta não aceita a categoria (CATEGORY_NOT_ACCEPTED).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
+          $ref: '#/components/responses/CategoryNotAccepted'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -359,14 +362,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DisposalResponse'
+              examples:
+                WaitingDisposal:
+                  $ref: '#/components/examples/WaitingDisposal'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/DisposalNotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+
     delete:
       tags: [Descartes]
       operationId: cancelDisposal
@@ -380,7 +387,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/DisposalNotFound'
         '409':
           $ref: '#/components/responses/InvalidDisposalState'
         '500':
@@ -393,13 +400,17 @@ paths:
       summary: Listar histórico de descartes do usuário atual (implementado no bootstrap e postgres)
       responses:
         '200':
-          description: Descartes do usuário do mais recente ao mais antigo, inclusive os cancelados. Retorna um array vazio se não houver registros.
+          description: Descartes do usuário do mais recente ao mais antigo, inclusive os cancelados. Retorna um array
+            vazio se não houver registros.
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: '#/components/schemas/DisposalHistoryItem'
+              examples:
+                DisposalHistory:
+                  $ref: '#/components/examples/DisposalHistory'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -437,7 +448,7 @@ paths:
                   deviceId: COL-001
                   disposalId: 42
                   eventType: WEIGHT_RECORDED
-                  weightKg: 3.8
+                  weightKg: 2.3
               abertura:
                 value:
                   eventId: evt-002
@@ -457,40 +468,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IotEventResponse'
+              examples:
+                WeightRecorded:
+                  $ref: '#/components/examples/WeightRecorded'
+                DoorOpened:
+                  $ref: '#/components/examples/DoorOpened'
+                DoorClosed:
+                  $ref: '#/components/examples/DoorClosed'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
-          description: Credencial de dispositivo ausente ou inválida (INVALID_DEVICE_KEY).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
+          $ref: '#/components/responses/DeviceUnauthorized'
         '403':
-          description: Credencial sem autorização para o coletor informado (DEVICE_FORBIDDEN).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
+          $ref: '#/components/responses/DeviceForbidden'
         '404':
-          description: Descarte indisponível para o coletor (RESOURCE_NOT_FOUND).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
+          $ref: '#/components/responses/IotNotFound'
         '409':
-          description: Estado incompatível (INVALID_DISPOSAL_STATE) ou evento divergente (EVENT_ID_CONFLICT).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
+          $ref: '#/components/responses/IotConflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
         '422':
-          description: Peso fora dos limites da categoria (WEIGHT_OUT_OF_RANGE).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
+          $ref: '#/components/responses/WeightOutOfRange'
         '500':
-          $ref: '#/components/responses/InternalError'
+          $ref: '#/components/responses/IotInternalError'
 
   /api/v1/users/me/wallet:
     get:
@@ -505,8 +505,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WalletResponse'
+              examples:
+                Wallet:
+                  $ref: '#/components/examples/Wallet'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/IdentityUnauthorized'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -525,6 +528,9 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/RewardResponse'
+              examples:
+                Rewards:
+                  $ref: '#/components/examples/Rewards'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -561,18 +567,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RedemptionResponse'
+              examples:
+                Redemption:
+                  $ref: '#/components/examples/Redemption'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/RedemptionBadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/IdentityUnauthorized'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/RewardNotFound'
         '409':
-          description: Saldo insuficiente (INSUFFICIENT_POINTS), benefício inativo ou esgotado (REWARD_UNAVAILABLE) ou chave reutilizada com outro benefício (IDEMPOTENCY_KEY_CONFLICT).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
+          $ref: '#/components/responses/RedemptionConflict'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -591,6 +596,9 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/RedemptionResponse'
+              examples:
+                Redemptions:
+                  $ref: '#/components/examples/Redemptions'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -605,7 +613,7 @@ components:
       description: |
         Envie `Authorization: Bearer <token>`. O JWT é assinado com HS256 e
         contém `sub` (ID imutável do usuário como string), `iat` (emissão),
-        `exp` (expiração) e `iss` (emissor da instância bootstrap).
+        `exp` (expiração) e `iss` (emissor da instância atual, em ambos os perfis).
     deviceKey:
       type: apiKey
       in: header
@@ -622,41 +630,735 @@ components:
 
   responses:
     BadRequest:
-      description: Dados de entrada ausentes, inválidos ou malformados (BAD_REQUEST).
+      description: Entrada ausente, malformada ou inválida. A validação HTTP retorna a mensagem genérica Bad Request.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiError'
+          examples:
+            ValidationError:
+              $ref: '#/components/examples/ValidationError'
+    EmailBadRequest:
+      description: Entrada inválida ou e-mail que excede o limite após normalização.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            ValidationError:
+              $ref: '#/components/examples/ValidationError'
+            EmailTooLong:
+              $ref: '#/components/examples/EmailTooLong'
+    UploadBadRequest:
+      description: Parte file ausente, vazia ou conteúdo de imagem inválido.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            ValidationError:
+              $ref: '#/components/examples/ValidationError'
+            EmptyPhoto:
+              $ref: '#/components/examples/EmptyPhoto'
+            InvalidPhotoContent:
+              $ref: '#/components/examples/InvalidPhotoContent'
+    RedemptionBadRequest:
+      description: ID ou Idempotency-Key ausente/inválido, ou corpo enviado indevidamente.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            ValidationError:
+              $ref: '#/components/examples/ValidationError'
+            RedemptionBody:
+              $ref: '#/components/examples/RedemptionBody'
     Unauthorized:
-      description: JWT ausente, inválido ou expirado (AUTHENTICATION_REQUIRED ou INVALID_TOKEN).
+      description: JWT ausente, inválido ou expirado.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            AuthenticationRequired:
+              $ref: '#/components/examples/AuthenticationRequired'
+            InvalidToken:
+              $ref: '#/components/examples/InvalidToken'
       headers:
         WWW-Authenticate:
-          description: Desafio HTTP para o esquema Bearer.
+          description: 'Emitido pelo filtro JWT: Bearer quando o token está ausente; Bearer error="invalid_token"
+            quando rejeitado.'
           schema:
             type: string
-          example: Bearer
+          examples:
+            ausente:
+              value: Bearer
+            invalido:
+              value: Bearer error="invalid_token"
+    IdentityUnauthorized:
+      description: JWT ausente/rejeitado ou identidade indisponível. O erro de identidade vem do serviço e não inclui
+        WWW-Authenticate.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiError'
+          examples:
+            AuthenticationRequired:
+              $ref: '#/components/examples/AuthenticationRequired'
+            InvalidToken:
+              $ref: '#/components/examples/InvalidToken'
+            IdentityUnavailable:
+              $ref: '#/components/examples/IdentityUnavailable'
+      headers:
+        WWW-Authenticate:
+          description: 'Emitido pelo filtro JWT: Bearer quando o token está ausente; Bearer error="invalid_token"
+            quando rejeitado.'
+          schema:
+            type: string
+          examples:
+            ausente:
+              value: Bearer
+            invalido:
+              value: Bearer error="invalid_token"
+    InvalidCredentials:
+      description: E-mail ou senha inválidos. Não é um desafio Bearer e não inclui WWW-Authenticate.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            InvalidCredentials:
+              $ref: '#/components/examples/InvalidCredentials'
+    DeviceUnauthorized:
+      description: X-Device-Key ausente, inválida ou duplicada. Authorization Bearer não autentica coletores; não
+        há desafio WWW-Authenticate Bearer.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            InvalidDeviceKey:
+              $ref: '#/components/examples/InvalidDeviceKey'
     NotFound:
-      description: Recurso inexistente ou fora do escopo do usuário (RESOURCE_NOT_FOUND).
+      description: Ponto de coleta inexistente.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiError'
+          examples:
+            ResourceNotFound:
+              $ref: '#/components/examples/ResourceNotFound'
+    PhotoNotFound:
+      description: Foto inexistente, de outra conta ou bytes indisponíveis.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            PhotoNotFound:
+              $ref: '#/components/examples/PhotoNotFound'
+    DisposalNotFound:
+      description: Descarte inexistente ou fora do escopo do usuário.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            DisposalNotFound:
+              $ref: '#/components/examples/DisposalNotFound'
+    CreationNotFound:
+      description: Coletor ou categoria inexistente; fotografia inexistente ou de outra conta.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            DeviceNotFound:
+              $ref: '#/components/examples/DeviceNotFound'
+            CategoryNotFound:
+              $ref: '#/components/examples/CategoryNotFound'
+            PhotoNotFound:
+              $ref: '#/components/examples/PhotoNotFound'
+    IotNotFound:
+      description: Descarte indisponível para o coletor autenticado.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            IotDisposalNotFound:
+              $ref: '#/components/examples/IotDisposalNotFound'
+    RewardNotFound:
+      description: Benefício inexistente.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            RewardNotFound:
+              $ref: '#/components/examples/RewardNotFound'
+    EmailConflict:
+      description: E-mail normalizado já cadastrado.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            EmailAlreadyInUse:
+              $ref: '#/components/examples/EmailAlreadyInUse'
     InvalidDisposalState:
-      description: O estado atual impede a operação (INVALID_DISPOSAL_STATE).
+      description: Somente WAITING_WEIGHT permite cancelamento.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiError'
+          examples:
+            CancelInvalidState:
+              $ref: '#/components/examples/CancelInvalidState'
+    CreationConflict:
+      description: Foto já vinculada, coletor ocupado ou coletor/ecoponto inativo.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            PhotoAlreadyLinked:
+              $ref: '#/components/examples/PhotoAlreadyLinked'
+            DeviceOccupied:
+              $ref: '#/components/examples/DeviceOccupied'
+            DeviceInactive:
+              $ref: '#/components/examples/DeviceInactive'
+    IotConflict:
+      description: Estado incompatível ou eventId reutilizado com conteúdo diferente.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            EventInvalidState:
+              $ref: '#/components/examples/EventInvalidState'
+            EventIdConflict:
+              $ref: '#/components/examples/EventIdConflict'
+    RedemptionConflict:
+      description: Saldo insuficiente, benefício indisponível ou chave usada para outro benefício.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            InsufficientPoints:
+              $ref: '#/components/examples/InsufficientPoints'
+            RewardUnavailable:
+              $ref: '#/components/examples/RewardUnavailable'
+            IdempotencyKeyConflict:
+              $ref: '#/components/examples/IdempotencyKeyConflict'
+    DeviceForbidden:
+      description: A chave não autoriza o deviceId informado.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            DeviceForbidden:
+              $ref: '#/components/examples/DeviceForbidden'
+    FileTooLarge:
+      description: Fotografia maior que 10 MiB ou limite multipart excedido.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            FileTooLarge:
+              $ref: '#/components/examples/FileTooLarge'
+    UnsupportedMediaType:
+      description: Content-Type incompatível com o endpoint.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            UnsupportedMediaType:
+              $ref: '#/components/examples/UnsupportedMediaType'
+    PhotoUnsupportedMediaType:
+      description: Requisição sem multipart/form-data ou arquivo sem formato JPEG/PNG.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            UnsupportedMediaType:
+              $ref: '#/components/examples/UnsupportedMediaType'
+            InvalidImageFormat:
+              $ref: '#/components/examples/InvalidImageFormat'
+    CategoryNotAccepted:
+      description: O ponto de coleta não aceita a categoria.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            CategoryNotAccepted:
+              $ref: '#/components/examples/CategoryNotAccepted'
+    WeightOutOfRange:
+      description: Peso fora do intervalo inclusivo da categoria.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            WeightOutOfRange:
+              $ref: '#/components/examples/WeightOutOfRange'
     InternalError:
-      description: Erro interno (INTERNAL_SERVER_ERROR).
+      description: Falha de persistência ou erro HTTP 5xx tratado pelo Spring MVC. São exemplos de causas distintas,
+        sem detalhes internos.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiError'
+          examples:
+            PersistenceFailure:
+              $ref: '#/components/examples/PersistenceFailure'
+            FrameworkInternalError:
+              $ref: '#/components/examples/FrameworkInternalError'
+    UploadInternalError:
+      description: Falha de persistência, erro HTTP 5xx do Spring MVC ou falha de I/O no armazenamento.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            PersistenceFailure:
+              $ref: '#/components/examples/PersistenceFailure'
+            FrameworkInternalError:
+              $ref: '#/components/examples/FrameworkInternalError'
+            PhotoStorageFailure:
+              $ref: '#/components/examples/PhotoStorageFailure'
+    IotInternalError:
+      description: Falha de persistência, erro HTTP 5xx do Spring MVC ou categoria do descarte indisponível.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            PersistenceFailure:
+              $ref: '#/components/examples/PersistenceFailure'
+            FrameworkInternalError:
+              $ref: '#/components/examples/FrameworkInternalError'
+            MissingDisposalCategory:
+              $ref: '#/components/examples/MissingDisposalCategory'
+  examples:
+    ValidationError:
+      summary: JSON malformado, campos ausentes, validação de campos ou parâmetros.
+      value:
+        status: 400
+        code: BAD_REQUEST
+        message: Bad Request
+        timestamp: '2026-11-18T17:00:00Z'
+    EmailTooLong:
+      summary: E-mail normalizado excede 254 caracteres.
+      value:
+        status: 400
+        code: BAD_REQUEST
+        message: O e-mail excede o tamanho permitido.
+        timestamp: '2026-11-18T17:00:00Z'
+    EmptyPhoto:
+      summary: Parte file presente, mas vazia.
+      value:
+        status: 400
+        code: BAD_REQUEST
+        message: Envie uma fotografia no campo file.
+        timestamp: '2026-11-18T17:00:00Z'
+    InvalidPhotoContent:
+      summary: Falha ao decodificar a imagem, por exemplo PNG truncado.
+      value:
+        status: 400
+        code: BAD_REQUEST
+        message: O conteúdo da fotografia está inválido.
+        timestamp: '2026-11-18T17:00:00Z'
+    RedemptionBody:
+      summary: Resgate enviado com corpo.
+      value:
+        status: 400
+        code: BAD_REQUEST
+        message: O resgate não aceita corpo na requisição.
+        timestamp: '2026-11-18T17:00:00Z'
+    AuthenticationRequired:
+      summary: JWT ausente.
+      value:
+        status: 401
+        code: AUTHENTICATION_REQUIRED
+        message: Autenticação necessária.
+        timestamp: '2026-11-18T17:00:00Z'
+    InvalidToken:
+      summary: JWT rejeitado pelo filtro de segurança.
+      value:
+        status: 401
+        code: INVALID_TOKEN
+        message: Token de acesso inválido ou expirado.
+        timestamp: '2026-11-18T17:00:00Z'
+    IdentityUnavailable:
+      summary: JWT válido, mas usuário ou carteira não está disponível.
+      value:
+        status: 401
+        code: INVALID_TOKEN
+        message: Identidade do usuário indisponível.
+        timestamp: '2026-11-18T17:00:00Z'
+    InvalidCredentials:
+      summary: Login com credenciais incorretas; não revela se o e-mail existe.
+      value:
+        status: 401
+        code: INVALID_CREDENTIALS
+        message: E-mail ou senha inválidos.
+        timestamp: '2026-11-18T17:00:00Z'
+    InvalidDeviceKey:
+      summary: X-Device-Key ausente, incorreta ou duplicada; JWT não substitui a chave.
+      value:
+        status: 401
+        code: INVALID_DEVICE_KEY
+        message: Credencial do coletor ausente ou inválida.
+        timestamp: '2026-11-18T17:00:00Z'
+    DeviceForbidden:
+      summary: deviceId diferente do autorizado pela chave.
+      value:
+        status: 403
+        code: DEVICE_FORBIDDEN
+        message: A credencial não autoriza o coletor informado.
+        timestamp: '2026-11-18T17:00:00Z'
+    ResourceNotFound:
+      summary: Ponto de coleta inexistente.
+      value:
+        status: 404
+        code: RESOURCE_NOT_FOUND
+        message: Recurso não encontrado.
+        timestamp: '2026-11-18T17:00:00Z'
+    PhotoNotFound:
+      summary: Foto inexistente, de outra conta ou bytes indisponíveis no download.
+      value:
+        status: 404
+        code: RESOURCE_NOT_FOUND
+        message: Fotografia não encontrada.
+        timestamp: '2026-11-18T17:00:00Z'
+    DisposalNotFound:
+      summary: Descarte inexistente ou de outra conta.
+      value:
+        status: 404
+        code: RESOURCE_NOT_FOUND
+        message: Descarte não encontrado.
+        timestamp: '2026-11-18T17:00:00Z'
+    DeviceNotFound:
+      summary: deviceId inexistente.
+      value:
+        status: 404
+        code: RESOURCE_NOT_FOUND
+        message: Coletor não encontrado.
+        timestamp: '2026-11-18T17:00:00Z'
+    CategoryNotFound:
+      summary: categoryId inexistente.
+      value:
+        status: 404
+        code: RESOURCE_NOT_FOUND
+        message: Categoria não encontrada.
+        timestamp: '2026-11-18T17:00:00Z'
+    IotDisposalNotFound:
+      summary: Descarte inexistente ou vinculado a outro coletor.
+      value:
+        status: 404
+        code: RESOURCE_NOT_FOUND
+        message: Descarte indisponível para o coletor.
+        timestamp: '2026-11-18T17:00:00Z'
+    RewardNotFound:
+      summary: Benefício inexistente.
+      value:
+        status: 404
+        code: RESOURCE_NOT_FOUND
+        message: Benefício não encontrado.
+        timestamp: '2026-11-18T17:00:00Z'
+    EmailAlreadyInUse:
+      summary: E-mail normalizado já associado a outra conta.
+      value:
+        status: 409
+        code: EMAIL_ALREADY_IN_USE
+        message: E-mail já cadastrado.
+        timestamp: '2026-11-18T17:00:00Z'
+    CancelInvalidState:
+      summary: Cancelamento fora de WAITING_WEIGHT.
+      value:
+        status: 409
+        code: INVALID_DISPOSAL_STATE
+        message: Somente um descarte que aguarda pesagem pode ser cancelado.
+        timestamp: '2026-11-18T17:00:00Z'
+    EventInvalidState:
+      summary: Evento incompatível com o estado do descarte.
+      value:
+        status: 409
+        code: INVALID_DISPOSAL_STATE
+        message: O estado atual do descarte não permite este evento.
+        timestamp: '2026-11-18T17:00:00Z'
+    EventIdConflict:
+      summary: eventId existente reutilizado com dados diferentes.
+      value:
+        status: 409
+        code: EVENT_ID_CONFLICT
+        message: O identificador já foi usado com outro conteúdo.
+        timestamp: '2026-11-18T17:00:00Z'
+    DeviceInactive:
+      summary: Coletor ou ecoponto inativo.
+      value:
+        status: 409
+        code: DEVICE_UNAVAILABLE
+        message: Coletor ou ponto de coleta inativo.
+        timestamp: '2026-11-18T17:00:00Z'
+    DeviceOccupied:
+      summary: Coletor ocupado por uma sessão ativa.
+      value:
+        status: 409
+        code: DEVICE_UNAVAILABLE
+        message: O coletor já tem um descarte ativo.
+        timestamp: '2026-11-18T17:00:00Z'
+    PhotoAlreadyLinked:
+      summary: photoId já utilizado.
+      value:
+        status: 409
+        code: PHOTO_ALREADY_LINKED
+        message: A fotografia já está associada a um descarte.
+        timestamp: '2026-11-18T17:00:00Z'
+    InsufficientPoints:
+      summary: Saldo menor que o custo do benefício.
+      value:
+        status: 409
+        code: INSUFFICIENT_POINTS
+        message: Saldo insuficiente para resgatar o benefício.
+        timestamp: '2026-11-18T17:00:00Z'
+    RewardUnavailable:
+      summary: Benefício inativo ou estoque zero.
+      value:
+        status: 409
+        code: REWARD_UNAVAILABLE
+        message: O benefício está inativo ou esgotado.
+        timestamp: '2026-11-18T17:00:00Z'
+    IdempotencyKeyConflict:
+      summary: Mesma chave do usuário usada para benefício diferente.
+      value:
+        status: 409
+        code: IDEMPOTENCY_KEY_CONFLICT
+        message: A chave já foi usada para resgatar outro benefício.
+        timestamp: '2026-11-18T17:00:00Z'
+    FileTooLarge:
+      summary: Limite do upload excedido.
+      value:
+        status: 413
+        code: FILE_TOO_LARGE
+        message: A fotografia deve ter até 10 MiB.
+        timestamp: '2026-11-18T17:00:00Z'
+    UnsupportedMediaType:
+      summary: Content-Type incompatível com o endpoint.
+      value:
+        status: 415
+        code: UNSUPPORTED_MEDIA_TYPE
+        message: Unsupported Media Type
+        timestamp: '2026-11-18T17:00:00Z'
+    InvalidImageFormat:
+      summary: Bytes sem formato JPEG/PNG, independentemente do nome e MIME declarado.
+      value:
+        status: 415
+        code: UNSUPPORTED_MEDIA_TYPE
+        message: Envie uma fotografia JPEG ou PNG.
+        timestamp: '2026-11-18T17:00:00Z'
+    CategoryNotAccepted:
+      summary: Categoria não aceita no ecoponto.
+      value:
+        status: 422
+        code: CATEGORY_NOT_ACCEPTED
+        message: O ponto de coleta não aceita a categoria.
+        timestamp: '2026-11-18T17:00:00Z'
+    WeightOutOfRange:
+      summary: Peso positivo com precisão válida, fora do intervalo inclusivo da categoria.
+      value:
+        status: 422
+        code: WEIGHT_OUT_OF_RANGE
+        message: O peso está fora dos limites da categoria.
+        timestamp: '2026-11-18T17:00:00Z'
+    PersistenceFailure:
+      summary: Falha de persistência; detalhes SQL não são enviados ao cliente.
+      value:
+        status: 500
+        code: INTERNAL_SERVER_ERROR
+        message: Não foi possível concluir a operação.
+        timestamp: '2026-11-18T17:00:00Z'
+    FrameworkInternalError:
+      summary: Exceção HTTP 5xx tratada pelo Spring MVC.
+      value:
+        status: 500
+        code: INTERNAL_SERVER_ERROR
+        message: Erro interno da aplicação.
+        timestamp: '2026-11-18T17:00:00Z'
+    PhotoStorageFailure:
+      summary: Falha de I/O ao armazenar a fotografia.
+      value:
+        status: 500
+        code: INTERNAL_SERVER_ERROR
+        message: Não foi possível armazenar a fotografia.
+        timestamp: '2026-11-18T17:00:00Z'
+    MissingDisposalCategory:
+      summary: Categoria do descarte indisponível durante a pesagem.
+      value:
+        status: 500
+        code: INTERNAL_SERVER_ERROR
+        message: A categoria do descarte não está disponível.
+        timestamp: '2026-11-18T17:00:00Z'
+    Profile:
+      summary: Exemplo ilustrativo no perfil postgres; IDs, horários e catálogo variam.
+      value:
+        id: 6
+        name: Ana Silva
+        email: ana@example.com
+    Token:
+      summary: Token ilustrativo; use o JWT real retornado pelo login.
+      value:
+        accessToken: <JWT retornado pelo login>
+        tokenType: Bearer
+        expiresIn: 3600
+    CollectionPoints:
+      summary: Exemplo ilustrativo no perfil postgres; IDs, horários e catálogo variam.
+      value:
+      - id: 1
+        name: Ecoponto Centro
+        address: Rua 14 de Julho, 1200 - Centro
+        latitude: -20.4628
+        longitude: -54.6152
+        isActive: true
+    CollectionPoint:
+      summary: Exemplo ilustrativo no perfil postgres; IDs, horários e catálogo variam.
+      value:
+        id: 1
+        name: Ecoponto Centro
+        address: Rua 14 de Julho, 1200 - Centro
+        latitude: -20.4628
+        longitude: -54.6152
+        isActive: true
+        acceptedCategoryIds:
+        - 1
+        - 2
+        - 3
+        - 5
+        devices:
+        - deviceId: COL-001
+          isActive: true
+        - deviceId: COL-002
+          isActive: true
+    Categories:
+      summary: Exemplo ilustrativo no perfil postgres; IDs, horários e catálogo variam.
+      value:
+      - id: 2
+        name: Notebooks
+        basePoints: 60
+        pointsPerKg: 10
+        maxPoints: 100
+        minWeightKg: 0.8
+        maxWeightKg: 5.0
+    Upload:
+      summary: Exemplo ilustrativo no perfil postgres; IDs, horários e catálogo variam.
+      value:
+        photoId: 0bcc2e7b-3d69-4af4-bfd9-5ed1f62985a5
+        photoUrl: http://localhost:8080/api/v1/uploads/0bcc2e7b-3d69-4af4-bfd9-5ed1f62985a5
+    WaitingDisposal:
+      summary: Exemplo ilustrativo no perfil postgres; IDs, horários e catálogo variam.
+      value:
+        id: 42
+        itemName: Notebook
+        categoryId: 2
+        status: WAITING_WEIGHT
+        weightKg: null
+        awardedPoints: 0
+        createdAt: '2026-11-18T17:00:00Z'
+        deviceId: COL-001
+        photoId: 0bcc2e7b-3d69-4af4-bfd9-5ed1f62985a5
+        photoUrl: http://localhost:8080/api/v1/uploads/0bcc2e7b-3d69-4af4-bfd9-5ed1f62985a5
+        estimatedPoints: null
+    DisposalHistory:
+      summary: Exemplo ilustrativo no perfil postgres; IDs, horários e catálogo variam.
+      value:
+      - id: 42
+        itemName: Notebook
+        categoryId: 2
+        status: WAITING_WEIGHT
+        weightKg: null
+        awardedPoints: 0
+        createdAt: '2026-11-18T17:00:00Z'
+    WeightRecorded:
+      summary: Exemplo ilustrativo no perfil postgres; IDs, horários e catálogo variam.
+      value:
+        eventId: evt-001
+        disposalId: 42
+        status: WAITING_DEPOSIT
+        weightKg: 2.3
+        estimatedPoints: 83
+        awardedPoints: 0
+    DoorOpened:
+      summary: Exemplo ilustrativo no perfil postgres; IDs, horários e catálogo variam.
+      value:
+        eventId: evt-002
+        disposalId: 42
+        status: DEPOSIT_IN_PROGRESS
+        weightKg: 2.3
+        estimatedPoints: 83
+        awardedPoints: 0
+    DoorClosed:
+      summary: Exemplo ilustrativo no perfil postgres; IDs, horários e catálogo variam.
+      value:
+        eventId: evt-003
+        disposalId: 42
+        status: COMPLETED
+        weightKg: 2.3
+        estimatedPoints: 83
+        awardedPoints: 83
+    Wallet:
+      summary: Exemplo ilustrativo no perfil postgres; IDs, horários e catálogo variam.
+      value:
+        availablePoints: 3
+        totalEarned: 83
+        totalRedeemed: 80
+        transactions:
+        - id: 12
+          type: DEBIT
+          points: 80
+          description: Resgate de Desconto de 10%
+          createdAt: '2026-11-18T17:05:00Z'
+        - id: 11
+          type: CREDIT
+          points: 83
+          description: Descarte de Notebook
+          createdAt: '2026-11-18T17:00:00Z'
+    Rewards:
+      summary: Exemplo ilustrativo no perfil postgres; IDs, horários e catálogo variam.
+      value:
+      - id: 2
+        name: Desconto de 10%
+        description: 10% de desconto em eletrônicos selecionados
+        partnerName: TechShop
+        costPoints: 80
+        availableQuantity: 29
+        active: true
+    Redemption:
+      summary: Exemplo ilustrativo no perfil postgres; IDs, horários e catálogo variam.
+      value:
+        redemptionId: 5
+        rewardId: 2
+        rewardName: Desconto de 10%
+        pointsSpent: 80
+        remainingPoints: 3
+        couponCode: RELOOP-0bcc2e7b-3d69-4af4-bfd9-5ed1f62985a5
+        redeemedAt: '2026-11-18T17:05:00Z'
+    Redemptions:
+      summary: Exemplo ilustrativo no perfil postgres; IDs, horários e catálogo variam.
+      value:
+      - redemptionId: 5
+        rewardId: 2
+        rewardName: Desconto de 10%
+        pointsSpent: 80
+        remainingPoints: 3
+        couponCode: RELOOP-0bcc2e7b-3d69-4af4-bfd9-5ed1f62985a5
+        redeemedAt: '2026-11-18T17:05:00Z'
 
   schemas:
     EntityId:
@@ -745,13 +1447,10 @@ components:
           format: int32
           minimum: 400
           maximum: 599
-          example: 409
         code:
           type: string
-          example: INVALID_DISPOSAL_STATE
         message:
           type: string
-          example: O descarte precisa estar aguardando pesagem.
         timestamp:
           $ref: '#/components/schemas/UtcTimestamp'
 

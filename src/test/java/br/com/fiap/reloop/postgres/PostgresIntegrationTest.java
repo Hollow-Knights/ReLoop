@@ -30,6 +30,8 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.context.annotation.Import;
+import br.com.fiap.reloop.contract.OpenApiErrorContractConfiguration;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -44,6 +46,7 @@ import org.testcontainers.utility.MountableFile;
 @ActiveProfiles("postgres")
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Import(OpenApiErrorContractConfiguration.class)
 class PostgresIntegrationTest {
     private static final String PASSWORD = "Senha123!";
     private static final String KEY = UUID.randomUUID().toString();
@@ -592,6 +595,148 @@ class PostgresIntegrationTest {
         mvc.perform(get("/api/v1/uploads/" + id).header("Authorization", auth(token)))
                 .andExpect(status().isOk()).andExpect(content().contentType("image/" + format)).andExpect(content().bytes(contents));
         mvc.perform(get("/api/v1/uploads/" + id).header("Authorization", auth(other))).andExpect(status().isNotFound());
+    }
+
+    private ResultActions safeError(ResultActions result, int status, String code, String message) throws Exception {
+        return result.andExpect(status().is(status)).andExpect(jsonPath("$.status").value(status))
+                .andExpect(jsonPath("$.code").value(code)).andExpect(jsonPath("$.message").value(message))
+                .andExpect(response -> assertThat(response.getResponse().getContentAsString()).doesNotContain(
+                        PASSWORD, KEY, SECRET, "passwordHash", "stackTrace", "org.postgresql", "jdbc:postgresql", "test rollback"));
+    }
+
+    @Test void authenticationAndProfileErrorsMatchTheDocumentedContract() throws Exception {
+        safeError(mvc.perform(post("/api/v1/auth/register").contentType("application/json").content("{}")),
+                400, "BAD_REQUEST", "Bad Request");
+        safeError(mvc.perform(post("/api/v1/auth/register").contentType("application/json").content("{")),
+                400, "BAD_REQUEST", "Bad Request");
+        String email = UUID.randomUUID() + "@example.test";
+        String token = register(email);
+        safeError(mvc.perform(post("/api/v1/auth/register").contentType("application/json")
+                .content(json(Map.of("name", "Duplicado", "email", email.toUpperCase(Locale.ROOT), "password", PASSWORD)))),
+                409, "EMAIL_ALREADY_IN_USE", "E-mail já cadastrado.");
+        safeError(mvc.perform(post("/api/v1/auth/login").contentType("application/json")
+                .content(json(Map.of("email", email, "password", "errada")))),
+                401, "INVALID_CREDENTIALS", "E-mail ou senha inválidos.")
+                .andExpect(header().doesNotExist("WWW-Authenticate"));
+        safeError(mvc.perform(post("/api/v1/auth/login").contentType("application/json").content("{}")),
+                400, "BAD_REQUEST", "Bad Request");
+        register("other@example.test");
+        safeError(mvc.perform(put("/api/v1/users/me").header("Authorization", auth(token)).contentType("application/json")
+                .content(json(Map.of("name", "Duplicado", "email", "other@example.test")))),
+                409, "EMAIL_ALREADY_IN_USE", "E-mail já cadastrado.");
+        safeError(mvc.perform(put("/api/v1/users/me").header("Authorization", auth(token)).contentType("application/json")
+                .content("{\"name\":\"Teste\",\"email\":\"ok@example.test\",\"userId\":7}")),
+                400, "BAD_REQUEST", "Bad Request");
+        safeError(mvc.perform(get("/api/v1/users/me/wallet")),
+                401, "AUTHENTICATION_REQUIRED", "Autenticação necessária.")
+                .andExpect(header().string("WWW-Authenticate", "Bearer"));
+        safeError(mvc.perform(get("/api/v1/users/me/wallet").header("Authorization", "Bearer invalid")),
+                401, "INVALID_TOKEN", "Token de acesso inválido ou expirado.")
+                .andExpect(header().string("WWW-Authenticate", "Bearer error=\"invalid_token\""));
+    }
+
+    @Test void publicCatalogAndUnsupportedMediaTypesAreDocumentedFaithfully() throws Exception {
+        String token = register();
+        for (String path : List.of("/api/v1/collection-points", "/api/v1/collection-points/1", "/api/v1/electronic-categories")) {
+            mvc.perform(get(path).header("Authorization", "Bearer invalid"))
+                    .andExpect(status().isOk()).andExpect(header().doesNotExist("WWW-Authenticate"));
+        }
+        safeError(mvc.perform(get("/api/v1/collection-points/999")), 404, "RESOURCE_NOT_FOUND", "Recurso não encontrado.");
+        for (String id : List.of("0", "abc")) {
+            safeError(mvc.perform(get("/api/v1/collection-points/" + id)), 400, "BAD_REQUEST", "Bad Request");
+        }
+        for (var request : List.of(post("/api/v1/auth/register"), post("/api/v1/auth/login"),
+                put("/api/v1/users/me"), post("/api/v1/disposals"), post("/api/v1/uploads"))) {
+            safeError(mvc.perform(request.header("Authorization", auth(token)).contentType("text/plain").content("{}")),
+                    415, "UNSUPPORTED_MEDIA_TYPE", "Unsupported Media Type");
+        }
+        safeError(mvc.perform(post("/api/v1/iot/events").header("X-Device-Key", KEY).contentType("text/plain").content("{}")),
+                415, "UNSUPPORTED_MEDIA_TYPE", "Unsupported Media Type");
+    }
+
+    @Test void iotErrorsDistinguishValidationCredentialsAuthorizationAndState() throws Exception {
+        String token = register(); long id = start(token);
+        safeError(mvc.perform(post("/api/v1/iot/events").contentType("application/json").content("{}")),
+                401, "INVALID_DEVICE_KEY", "Credencial do coletor ausente ou inválida.")
+                .andExpect(header().doesNotExist("WWW-Authenticate"));
+        safeError(mvc.perform(post("/api/v1/iot/events").header("X-Device-Key", KEY).contentType("application/json").content("{}")),
+                400, "BAD_REQUEST", "Bad Request");
+        safeError(mvc.perform(post("/api/v1/iot/events").header("X-Device-Key", KEY).contentType("application/json")
+                .content(weightPayload(id, "foreign-device", "COL-002", "2.3"))),
+                403, "DEVICE_FORBIDDEN", "A credencial não autoriza o coletor informado.");
+        safeError(event(mvc, 999, "missing-disposal", "DOOR_OPENED", null),
+                404, "RESOURCE_NOT_FOUND", "Descarte indisponível para o coletor.");
+        safeError(event(mvc, id, "wrong-state", "DOOR_CLOSED", null),
+                409, "INVALID_DISPOSAL_STATE", "O estado atual do descarte não permite este evento.");
+        safeError(event(mvc, id, "bad-weight", "WEIGHT_RECORDED", "0.799"),
+                422, "WEIGHT_OUT_OF_RANGE", "O peso está fora dos limites da categoria.");
+        event(mvc, id, "reused-event", "WEIGHT_RECORDED", "2.3").andExpect(status().isOk());
+        safeError(event(mvc, id, "reused-event", "WEIGHT_RECORDED", "2.4"),
+                409, "EVENT_ID_CONFLICT", "O identificador já foi usado com outro conteúdo.");
+    }
+
+    @Test void creationAndOwnershipErrorsKeepTheirOperationSpecificMessages() throws Exception {
+        String token = register(); String other = register(); String photo = upload(token);
+        for (var entry : Map.of("UNKNOWN", "Coletor não encontrado.", "COL-001", "Categoria não encontrada.").entrySet()) {
+            long category = entry.getKey().equals("UNKNOWN") ? 2 : 999;
+            safeError(mvc.perform(post("/api/v1/disposals").header("Authorization", auth(token)).contentType("application/json")
+                    .content(json(Map.of("deviceId", entry.getKey(), "categoryId", category, "itemName", "Notebook", "photoId", photo)))),
+                    404, "RESOURCE_NOT_FOUND", entry.getValue());
+        }
+        safeError(mvc.perform(post("/api/v1/disposals").header("Authorization", auth(token)).contentType("application/json")
+                .content(json(Map.of("deviceId", "COL-003", "categoryId", 1, "itemName", "Celular", "photoId", photo)))),
+                409, "DEVICE_UNAVAILABLE", "Coletor ou ponto de coleta inativo.");
+        safeError(mvc.perform(post("/api/v1/disposals").header("Authorization", auth(token)).contentType("application/json")
+                .content(json(Map.of("deviceId", "COL-001", "categoryId", 4, "itemName", "Monitor", "photoId", photo)))),
+                422, "CATEGORY_NOT_ACCEPTED", "O ponto de coleta não aceita a categoria.");
+        safeError(create(other, photo), 404, "RESOURCE_NOT_FOUND", "Fotografia não encontrada.");
+        safeError(mvc.perform(get("/api/v1/uploads/" + photo).header("Authorization", auth(other))),
+                404, "RESOURCE_NOT_FOUND", "Fotografia não encontrada.");
+        safeError(mvc.perform(get("/api/v1/uploads/not-a-uuid").header("Authorization", auth(token))),
+                400, "BAD_REQUEST", "Bad Request");
+        long id = body(create(token, photo).andExpect(status().isCreated()).andReturn()).get("id").asLong();
+        safeError(create(token, photo), 409, "PHOTO_ALREADY_LINKED", "A fotografia já está associada a um descarte.");
+        safeError(create(token, upload(token)), 409, "DEVICE_UNAVAILABLE", "O coletor já tem um descarte ativo.");
+        safeError(mvc.perform(get("/api/v1/disposals/" + id).header("Authorization", auth(other))),
+                404, "RESOURCE_NOT_FOUND", "Descarte não encontrado.");
+        event(mvc, id, "weighed", "WEIGHT_RECORDED", "2.3").andExpect(status().isOk());
+        safeError(mvc.perform(delete("/api/v1/disposals/" + id).header("Authorization", auth(token))),
+                409, "INVALID_DISPOSAL_STATE", "Somente um descarte que aguarda pesagem pode ser cancelado.");
+    }
+
+    @Test void redemptionErrorsDistinguishBalanceStockAndIdempotency() throws Exception {
+        String token = register();
+        safeError(mvc.perform(post("/api/v1/rewards/2/redeem").header("Authorization", auth(token))),
+                400, "BAD_REQUEST", "Bad Request");
+        safeError(redeem(mvc, token, "invalid key", 2), 400, "BAD_REQUEST", "Bad Request");
+        safeError(mvc.perform(post("/api/v1/rewards/2/redeem").header("Authorization", auth(token))
+                .header("Idempotency-Key", "body").contentType("application/json").content("{}")),
+                400, "BAD_REQUEST", "O resgate não aceita corpo na requisição.");
+        safeError(redeem(mvc, token, "missing", 999), 404, "RESOURCE_NOT_FOUND", "Benefício não encontrado.");
+        safeError(redeem(mvc, token, "poor", 2), 409, "INSUFFICIENT_POINTS", "Saldo insuficiente para resgatar o benefício.");
+        for (long reward : List.of(3L, 5L)) {
+            safeError(redeem(mvc, token, "unavailable-" + reward, reward),
+                    409, "REWARD_UNAVAILABLE", "O benefício está inativo ou esgotado.");
+        }
+        complete(start(token));
+        redeem(mvc, token, "same-key", 2).andExpect(status().isCreated());
+        safeError(redeem(mvc, token, "same-key", 1),
+                409, "IDEMPOTENCY_KEY_CONFLICT", "A chave já foi usada para resgatar outro benefício.");
+    }
+
+    @Test void missingIdentityIsAService401WithoutABearerChallenge() throws Exception {
+        String token = register();
+        jdbc.update("DELETE FROM wallets WHERE user_id=6");
+        safeError(mvc.perform(get("/api/v1/users/me/wallet").header("Authorization", auth(token))),
+                401, "INVALID_TOKEN", "Identidade do usuário indisponível.")
+                .andExpect(header().doesNotExist("WWW-Authenticate"));
+        safeError(redeem(mvc, token, "no-wallet", 2), 401, "INVALID_TOKEN", "Identidade do usuário indisponível.");
+        jdbc.update("DELETE FROM users WHERE id=6");
+        safeError(mvc.perform(get("/api/v1/users/me").header("Authorization", auth(token))),
+                401, "INVALID_TOKEN", "Identidade do usuário indisponível.");
+        safeError(mvc.perform(put("/api/v1/users/me").header("Authorization", auth(token)).contentType("application/json")
+                .content(json(Map.of("name", "Teste", "email", "gone@example.test")))),
+                401, "INVALID_TOKEN", "Identidade do usuário indisponível.");
     }
 
     @Test void initializationGuardCreatesAnEmptyDisposableDatabaseAndRefusesReapplication() throws Exception {
