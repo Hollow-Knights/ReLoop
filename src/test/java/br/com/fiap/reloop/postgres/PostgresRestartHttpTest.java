@@ -23,6 +23,8 @@ import org.testcontainers.utility.MountableFile;
 /** Real TCP requests with the first application fully stopped before the second starts. */
 @Testcontainers
 class PostgresRestartHttpTest {
+    // JUnit/Testcontainers owns the lifecycle of this static @Container.
+    @SuppressWarnings("resource")
     @Container static final PostgreSQLContainer<?> DB=new PostgreSQLContainer<>("postgres:16.11-alpine3.23")
             .withCopyFileToContainer(MountableFile.forHostPath(Path.of("database/schema/database.sql").toAbsolutePath()),
                     "/docker-entrypoint-initdb.d/01-hiago.sql");

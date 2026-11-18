@@ -50,6 +50,8 @@ class PostgresIntegrationTest {
     private static final String SECRET = secret();
     private static final Path PHOTO_ROOT = photoRoot();
     private static final Path SQL = Path.of("database/schema/database.sql").toAbsolutePath();
+    // JUnit/Testcontainers owns the lifecycle of this static @Container.
+    @SuppressWarnings("resource")
     @Container static final PostgreSQLContainer<?> DB = new PostgreSQLContainer<>("postgres:16.11-alpine3.23")
             .withCopyFileToContainer(MountableFile.forHostPath(SQL), "/docker-entrypoint-initdb.d/01-hiago.sql");
     @Autowired MockMvc mvc;
