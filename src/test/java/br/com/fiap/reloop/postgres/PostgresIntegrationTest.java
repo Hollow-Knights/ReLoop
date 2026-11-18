@@ -1,5 +1,9 @@
 package br.com.fiap.reloop.postgres;
 
+import br.com.fiap.reloop.contract.DisposalFormScenarios;
+import br.com.fiap.reloop.upload.repository.PhotoStorage;
+import br.com.fiap.reloop.disposal.repository.DisposalRepository;
+
 import br.com.fiap.reloop.contract.CpfRegistrationScenarios;
 import br.com.fiap.reloop.user.repository.UserRepository;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -893,6 +897,44 @@ class PostgresIntegrationTest {
         var result = DB.execInContainer("psql", "-X", "-v", "ON_ERROR_STOP=1", "-At", "-U", DB.getUsername(), "-d", database, "-c", query);
         assertThat(result.getExitCode()).isZero();
         return result.getStdout().strip();
+    }
+
+    @Autowired PhotoStorage formPhotos;
+    @Autowired DisposalRepository formDisposals;
+    private DisposalFormScenarios forms() {
+        return new DisposalFormScenarios(mvc,formPhotos,formDisposals,PHOTO_ROOT,true,()->count("uploaded_files"));
+    }
+
+    @ParameterizedTest @ValueSource(strings={"png","jpeg"})
+    void multipartDisposalAcceptsRealImages(String format) throws Exception { forms().valid(format); }
+    @ParameterizedTest @ValueSource(strings={"empty","fake","truncated","oversized","gif"})
+    void multipartDisposalRejectsInvalidPhotosWithoutResidue(String kind) throws Exception { forms().invalidPhoto(kind); }
+    @ParameterizedTest @ValueSource(strings={"deviceId","categoryId","itemName","file","blank-device","zero-category","fractional-category","blank-name","long-name"})
+    void multipartDisposalValidatesAllFormFields(String kind) throws Exception { forms().invalidField(kind); }
+    @ParameterizedTest @ValueSource(strings={"device-missing","category-missing","inactive","not-accepted"})
+    void multipartDisposalRejectsInvalidTargetsWithoutResidue(String kind) throws Exception { forms().targetError(kind); }
+    @ParameterizedTest @ValueSource(strings={"missing","invalid"})
+    void multipartDisposalRequiresJwt(String kind) throws Exception { forms().jwt(kind); }
+    @ParameterizedTest @ValueSource(strings={"write","close"})
+    void multipartDisposalStorageFailureLeavesNoPartialState(String stage) throws Exception { forms().storageFailure(stage); }
+    @Test void competingMultipartDisposalsKeepOnlyOnePhotoAndDisposal() throws Exception { forms().competingForms(); }
+    @Test void multipartDisposalAlwaysOwnsItsNewPhoto() throws Exception { forms().isolationAndForgedPhotoId(); }
+
+    @Test void rejectedMultipartDisposalRollsBackMetadataFileAndCollector() throws Exception {
+        var checks=forms();var user=checks.account();long before=checks.files();
+        rejectWrites("test_reject_form", "disposals", "NEW.user_id > 5");
+        try {
+            safeError(mvc.perform(DisposalFormScenarios.form(new MockMultipartFile("file","item.png","image/png",DisposalFormScenarios.image("png")))
+                    .header("Authorization",user.bearer())),500,"INTERNAL_SERVER_ERROR","Não foi possível concluir a operação.");
+            assertThat(checks.files()).isEqualTo(before);
+            assertThat(count("uploaded_files")).isEqualTo(10);
+            assertThat(count("disposals")).isEqualTo(10);
+            assertThat(formDisposals.findByUserId(user.id())).isEmpty();
+        } finally { removeRejection("test_reject_form","disposals"); }
+        mvc.perform(DisposalFormScenarios.form(new MockMultipartFile("file","retry.png","image/png",DisposalFormScenarios.image("png")))
+                .header("Authorization",user.bearer())).andExpect(status().isCreated());
+        assertThat(count("uploaded_files")).isEqualTo(11);
+        assertThat(checks.files()).isEqualTo(before+1);
     }
 
 }

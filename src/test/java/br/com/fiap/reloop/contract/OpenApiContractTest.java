@@ -87,6 +87,24 @@ class OpenApiContractTest {
         assertThat(errors.has("EmailAlreadyInUse")).isTrue();
     }
 
+    @Test void disposalDocumentsBothJsonAndMultipartWithoutChangingTheSuccessContract() {
+        JsonNode operation = DOCUMENT.at("/paths/~1api~1v1~1disposals/post");
+        JsonNode content = operation.at("/requestBody/content");
+        assertThat(content.path("application/json").at("/schema/$ref").asText())
+                .isEqualTo("#/components/schemas/CreateDisposalRequest");
+        JsonNode form = resolve(content.path("multipart/form-data").path("schema"));
+        var required = new java.util.HashSet<String>();
+        form.path("required").forEach(field -> required.add(field.asText()));
+        assertThat(required).containsExactlyInAnyOrder("deviceId", "categoryId", "itemName", "file");
+        assertThat(form.at("/properties/file/format").asText()).isEqualTo("binary");
+        assertThat(resolve(form.at("/properties/categoryId")).path("type").asText()).isEqualTo("integer");
+        assertThat(form.path("properties").has("photoId")).isFalse();
+        assertThat(operation.at("/responses/201/content/application~1json/schema/$ref").asText())
+                .isEqualTo("#/components/schemas/DisposalResponse");
+        assertThat(operation.path("responses").has("413")).isTrue();
+        assertThat(operation.path("description").asText()).contains("STATUS_UNKNOWN", "multipart/form-data");
+    }
+
     @ParameterizedTest(name = "{1} {0}: response examples and authentication")
     @MethodSource("operations")
     void everyOperationHasContextualResponseExamples(String path, String method, JsonNode operation) {

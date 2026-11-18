@@ -397,12 +397,24 @@ paths:
         a categoria. A foto deve pertencer ao cidadão e estar livre para associação.
         Cada coletor admite uma sessão ativa por vez. O usuário é identificado pelo
         contexto da requisição.
+        Aceita JSON com photoId já enviado pelo endpoint de upload, ou multipart/form-data
+        com deviceId, categoryId, itemName e file. No multipart, a foto é criada para o
+        titular do JWT e associada somente ao novo descarte. Não envie photoId nesse formato.
+        No postgres, metadados e descarte usam a mesma transação; rollback confirmado
+        remove o arquivo, e STATUS_UNKNOWN preserva o arquivo para reconciliação.
+        No bootstrap, falhas revertem o descarte e compensam somente os uploads criados pela requisição.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateDisposalRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CreateDisposalFormRequest'
+            encoding:
+              file:
+                contentType: 'image/jpeg, image/png'
       responses:
         '201':
           description: Descarte em WAITING_WEIGHT, com peso e estimativa nulos e zero pontos creditados.
@@ -414,19 +426,21 @@ paths:
                 WaitingDisposal:
                   $ref: '#/components/examples/WaitingDisposal'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/DisposalFormBadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/CreationNotFound'
         '409':
           $ref: '#/components/responses/CreationConflict'
+        '413':
+          $ref: '#/components/responses/FileTooLarge'
         '415':
-          $ref: '#/components/responses/UnsupportedMediaType'
+          $ref: '#/components/responses/PhotoUnsupportedMediaType'
         '422':
           $ref: '#/components/responses/CategoryNotAccepted'
         '500':
-          $ref: '#/components/responses/InternalError'
+          $ref: '#/components/responses/DisposalFormInternalError'
 
   /api/v1/disposals/{id}:
     parameters:
@@ -709,6 +723,35 @@ components:
         $ref: '#/components/schemas/EntityId'
 
   responses:
+    DisposalFormBadRequest:
+      description: JSON ou formulário inválido, campos obrigatórios ausentes, arquivo
+        vazio ou imagem truncada. Mensagens específicas de foto aplicam-se ao multipart;
+        o JSON com photoId continua aceito.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            ValidationError:
+              $ref: '#/components/examples/ValidationError'
+            EmptyPhoto:
+              $ref: '#/components/examples/EmptyPhoto'
+            InvalidPhotoContent:
+              $ref: '#/components/examples/InvalidPhotoContent'
+    DisposalFormInternalError:
+      description: Falha de persistência, erro HTTP 5xx tratado pelo Spring MVC ou falha
+        de armazenamento da fotografia no formulário.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            PersistenceFailure:
+              $ref: '#/components/examples/PersistenceFailure'
+            FrameworkInternalError:
+              $ref: '#/components/examples/FrameworkInternalError'
+            PhotoStorageFailure:
+              $ref: '#/components/examples/PhotoStorageFailure'
     RegistrationBadRequest:
       description: Dados inválidos, inclusive CPF ausente, nulo, formato ou dígitos verificadores
         inválidos. A mensagem HTTP de validação permanece genérica.
@@ -1740,6 +1783,29 @@ components:
           $ref: '#/components/schemas/PhotoId'
         photoUrl:
           $ref: '#/components/schemas/PhotoUrl'
+    CreateDisposalFormRequest:
+      type: object
+      required:
+      - deviceId
+      - categoryId
+      - itemName
+      - file
+      properties:
+        deviceId:
+          $ref: '#/components/schemas/DeviceId'
+        categoryId:
+          $ref: '#/components/schemas/EntityId'
+        itemName:
+          type: string
+          minLength: 1
+          maxLength: 120
+          example: Celular
+        file:
+          type: string
+          format: binary
+          description: JPEG/PNG real de 1 byte a 10 MiB, validado pelo conteúdo. Obrigatório;
+            nome e MIME declarado não substituem a validação da imagem.
+
     CreateDisposalRequest:
       type: object
       additionalProperties: false

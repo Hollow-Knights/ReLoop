@@ -206,20 +206,29 @@ A base original é recarregada entre os métodos nos bancos descartáveis.
 
 | Classe | Execuções | Verificações |
 | --- | ---: | --- |
-| `PostgresIntegrationTest` | 77 | Jornada e regressões anteriores; carteira consistente com resgate entre consultas; JWT ausente/malformado/expirado/assinatura e emissor incorretos/sem assinatura; isolamento; credenciais e payloads IoT; fotos ausentes/vazias/falsas/truncadas/GIF/grandes; PNG/JPEG; inicialização e rejeição da reaplicação em banco Testcontainers. |
-| `PostgresRestartHttpTest` | 1 | HTTP real/Tomcat, rejeição 413 de upload grande, encerramento completo, nova aplicação e recuperação de foto, usuário, carteira, eventos e cupom. |
-| `BootstrapRegressionTest` | 21 | Health, catálogo, cadastro/login, precisão e jornada completa com crédito/resgate/replays. Cada método tem contexto próprio. |
+| `PostgresIntegrationTest` | 104 | Jornada e regressões anteriores; carteira consistente com resgate entre consultas; JWT ausente/malformado/expirado/assinatura e emissor incorretos/sem assinatura; isolamento; credenciais e payloads IoT; fotos ausentes/vazias/falsas/truncadas/GIF/grandes; PNG/JPEG; inicialização e rejeição da reaplicação em banco Testcontainers. |
+| `PostgresRestartHttpTest` | 2 | HTTP real/Tomcat, rejeição 413 de upload grande, encerramento completo, nova aplicação e recuperação de foto, usuário, carteira, eventos e cupom. |
+| `BootstrapRegressionTest` | 48 | Health, catálogo, cadastro/login, precisão e jornada completa com crédito/resgate/replays. Cada método tem contexto próprio. |
 | `PhotoCompletionTest` | 3 | Callback de commit, rollback e resultado desconhecido, com bytes reais e store simulado; retenção/limpeza e aviso de reconciliação. |
 | `PostgresInitializationScriptTest` | 9 | Script real com Docker CLI simulado: espera saudável com limite, timeout configurável, falha sem executar SQL, propagação de erro de banco preenchido e cinco valores inválidos de timeout. |
 
-Além das regressões anteriores, `OpenApiContractTest` executa 25 verificações de
+Além das regressões anteriores, `OpenApiContractTest` executa 26 verificações de
 contrato e `UserDocumentPrivacyTest` executa duas de privacidade/rollback em memória.
 Os cenários de CPF cobrem ambos os perfis, zeros iniciais, normalização, formatos
 inválidos, duplicidade, concorrência, migração de legados e reinicialização.
 
-Resultado em Java 21 após o Bloco CPF: **138 testes, 138 passaram, zero falhas,
+O formulário multipart reutiliza as validações e serviços existentes. Uma fronteira
+transacional de serviço no perfil postgres inclui metadados de foto e descarte;
+o callback de `JpaPhotoStorage` continua responsável pelo arquivo em rollback ou
+resultado desconhecido. Os testes abrangem JPEG/PNG, campos, credenciais, isolamento,
+concorrência, falha de escrita/fechamento e falha na inserção do descarte. O teste
+TCP recupera foto e descarte após reiniciar a aplicação e verifica o limite real
+do servlet. `TemporaryPhotoScopeTest` adiciona duas verificações de compensação
+e preservação de registros/fotos anteriores no bootstrap.
+
+Resultado em Java 21 após o formulário integrado: **196 testes, 196 passaram, zero falhas,
 erros ou ignorados; BUILD SUCCESS** (`./mvnw clean verify`). Os relatórios estão
-em `target/surefire-reports`. Os 103 testes anteriores ao Bloco CPF foram preservados.
+em `target/surefire-reports`. Os 138 testes anteriores ao formulário integrado foram preservados.
 
 O teste da carteira intercala consultas e resgate usando latches, sem sleeps.
 Com o comportamento anterior `READ COMMITTED`, ele foi executado e falhou:

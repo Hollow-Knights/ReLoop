@@ -1,5 +1,8 @@
 package br.com.fiap.reloop.postgres;
 
+import br.com.fiap.reloop.contract.DisposalFormScenarios;
+import br.com.fiap.reloop.upload.repository.PhotoStorage;
+
 import br.com.fiap.reloop.contract.CpfRegistrationScenarios;
 import br.com.fiap.reloop.user.repository.UserRepository;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -9,6 +12,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import br.com.fiap.reloop.support.TestDocuments;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import java.util.Base64;
 import java.util.UUID;
@@ -126,6 +130,46 @@ class BootstrapRegressionTest {
     }
     @Test void duplicateCpfIsNormalizedAndDoesNotLeak(CapturedOutput output) throws Exception {
         new CpfRegistrationScenarios(mvc, userRepository).duplicateIsSafeAndNormalized(output);
+    }
+
+    @Autowired PhotoStorage formPhotos;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    br.com.fiap.reloop.disposal.repository.InMemoryDisposalRepository formDisposals;
+    private DisposalFormScenarios forms() {
+        return new DisposalFormScenarios(mvc,formPhotos,formDisposals,
+                (java.nio.file.Path) org.springframework.test.util.ReflectionTestUtils.getField(formPhotos,"directory"),false,
+                ()->((java.util.Map<?,?>) org.springframework.test.util.ReflectionTestUtils.getField(formPhotos,"photos")).size());
+    }
+
+    @ParameterizedTest @ValueSource(strings={"png","jpeg"})
+    void multipartDisposalAcceptsRealImages(String format) throws Exception { forms().valid(format); }
+    @ParameterizedTest @ValueSource(strings={"empty","fake","truncated","oversized","gif"})
+    void multipartDisposalRejectsInvalidPhotosWithoutResidue(String kind) throws Exception { forms().invalidPhoto(kind); }
+    @ParameterizedTest @ValueSource(strings={"deviceId","categoryId","itemName","file","blank-device","zero-category","fractional-category","blank-name","long-name"})
+    void multipartDisposalValidatesAllFormFields(String kind) throws Exception { forms().invalidField(kind); }
+    @ParameterizedTest @ValueSource(strings={"device-missing","category-missing","inactive","not-accepted"})
+    void multipartDisposalRejectsInvalidTargetsWithoutResidue(String kind) throws Exception { forms().targetError(kind); }
+    @ParameterizedTest @ValueSource(strings={"missing","invalid"})
+    void multipartDisposalRequiresJwt(String kind) throws Exception { forms().jwt(kind); }
+    @ParameterizedTest @ValueSource(strings={"write","close"})
+    void multipartDisposalStorageFailureLeavesNoPartialState(String stage) throws Exception { forms().storageFailure(stage); }
+    @Test void competingMultipartDisposalsKeepOnlyOnePhotoAndDisposal() throws Exception { forms().competingForms(); }
+    @Test void multipartDisposalAlwaysOwnsItsNewPhoto() throws Exception { forms().isolationAndForgedPhotoId(); }
+
+    @Test void failedMemoryDisposalCreationCompensatesOnlyItsOwnPhoto() throws Exception {
+        var checks=forms();var user=checks.account();long before=checks.files();
+        org.mockito.Mockito.doThrow(new org.springframework.dao.DataAccessResourceFailureException("private-path failure"))
+                .when(formDisposals).create(org.mockito.ArgumentMatchers.anyLong(),org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.anyLong(),org.mockito.ArgumentMatchers.anyString(),org.mockito.ArgumentMatchers.any());
+        mvc.perform(DisposalFormScenarios.form(new org.springframework.mock.web.MockMultipartFile("file","item.png","image/png",DisposalFormScenarios.image("png")))
+                .header("Authorization",user.bearer())).andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.message").value("Não foi possível concluir a operação."));
+        assertThat(checks.files()).isEqualTo(before);
+        assertThat(((java.util.Map<?,?>)org.springframework.test.util.ReflectionTestUtils.getField(formPhotos,"photos"))).isEmpty();
+        assertThat(formDisposals.findByUserId(user.id())).isEmpty();
+        org.mockito.Mockito.reset(formDisposals);
+        mvc.perform(DisposalFormScenarios.form(new org.springframework.mock.web.MockMultipartFile("file","retry.png","image/png",DisposalFormScenarios.image("png")))
+                .header("Authorization",user.bearer())).andExpect(status().isCreated());
     }
 
 }

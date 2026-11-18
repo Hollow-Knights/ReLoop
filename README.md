@@ -186,6 +186,38 @@ Um ID positivo inexistente retorna `404`. IDs inválidos, como `0` ou
 Execute a aplicação com o perfil `bootstrap`, conforme a seção anterior.
 Use o token obtido no login para enviar fotos e gerenciar seus descartes.
 
+O aplicativo pode enviar o formulário e a imagem em uma única requisição:
+
+```sh
+curl -fsS http://localhost:8080/api/v1/disposals \
+  -H "Authorization: Bearer $token" \
+  -F 'deviceId=COL-001' \
+  -F 'categoryId=1' \
+  -F 'itemName=Celular' \
+  -F 'file=@/caminho/item.png;type=image/png'
+```
+
+O curl define `multipart/form-data` e seu boundary. Todos os quatro campos são
+obrigatórios. São aceitos JPEG/PNG reais de até 10 MiB, validados pelo conteúdo.
+A resposta é `201` com o mesmo `DisposalResponse`, incluindo `photoId` e `photoUrl`.
+A foto pertence ao titular do JWT; parâmetros extras não escolhem o proprietário
+nem substituem o `photoId` gerado pelo servidor. O fluxo JSON com `photoId` e o
+endpoint separado de upload continuam disponíveis, conforme os exemplos abaixo.
+
+No postgres, upload e descarte participam de uma única transação. O callback
+existente apaga o arquivo somente em rollback confirmado; em `STATUS_UNKNOWN`,
+preserva o arquivo e registra a necessidade de reconciliação. No bootstrap,
+a operação mantém o bloqueio do repositório em memória até terminar, desfaz
+inserções novas se falhar e compensa apenas as fotos criadas naquele escopo.
+Inclusive falhas ao fechar o stream depois de salvá-lo acionam essa compensação.
+Formulários são serializados nesse perfil de demonstração.
+
+Filesystem e PostgreSQL não têm commit distribuído: uma queda abrupta pode deixar
+arquivo pendente de reconciliação, e uma falha física ao remover arquivos exige
+intervenção. Não existe limpeza automática para resultados transacionais
+incertos, que poderia excluir uma fotografia confirmada.
+
+
 | Operação | Resultado |
 | --- | --- |
 | `POST /api/v1/uploads` | `201` com `photoId` e `photoUrl`. |
@@ -388,7 +420,7 @@ Com Java 21 e Docker Desktop ativo:
 Os testes usam PostgreSQL real em contêineres descartáveis e um diretório de
 fotos temporário. Não precisam de `.env`, banco criado manualmente ou JWT
 externo. Incluem concorrência, rollback e reinício com HTTP real, além da
-regressão bootstrap. Após o cadastro com CPF, a suíte tem 138 testes, preservando os 103 anteriores, incluindo leitura
+regressão bootstrap. Após o formulário integrado, a suíte tem 196 testes, preservando os 138 anteriores, incluindo leitura
 consistente de carteira, estados de conclusão de upload, inicialização limitada
 e casos negativos de JWT, IoT e fotografias. Os relatórios ficam em
 `target/surefire-reports`. Veja as [correções da auditoria](docs/database/postgres-audit-fixes.md).
