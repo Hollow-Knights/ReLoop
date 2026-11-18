@@ -32,6 +32,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.context.annotation.Import;
 import br.com.fiap.reloop.contract.OpenApiErrorContractConfiguration;
+import br.com.fiap.reloop.contract.MobileContractScenarios;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -762,4 +763,17 @@ class PostgresIntegrationTest {
         assertThat(counts.getExitCode()).isZero();
         assertThat(counts.getStdout().strip()).isEqualTo("5:10:12");
     }
+    @Test void mobileProfileAliasesShareReadAndUpdate() throws Exception {
+        new MobileContractScenarios(mvc).profileAliasesReadAndUpdateTheSameAccount();
+    }
+    @Test void mobileProfileAliasesRequireJwt() throws Exception {
+        new MobileContractScenarios(mvc).bothProfileAliasesRequireBearerJwt();
+    }
+    @Test void mobileProfileIdentityAndValidationAreIsolated() throws Exception {
+        new MobileContractScenarios(mvc).profileIdentityAndValidationStayIsolated();
+    }
+    @Test void mobilePointDistancesAreNumericStableAndConsistent() throws Exception {
+        new MobileContractScenarios(mvc).everyPointHasTheSameStableNumericDistanceInListAndDetail();
+    }
+
 }

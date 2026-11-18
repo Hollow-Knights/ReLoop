@@ -12,6 +12,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.context.annotation.Import;
 import br.com.fiap.reloop.contract.OpenApiErrorContractConfiguration;
+import br.com.fiap.reloop.contract.MobileContractScenarios;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -88,6 +89,19 @@ class BootstrapRegressionTest {
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.couponCode").value(coupon));
         mvc.perform(get("/api/v1/users/me/wallet").header("Authorization",token)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.availablePoints").value(13)).andExpect(jsonPath("$.transactions.length()").value(2));
+    }
+
+    @Test void mobileProfileAliasesShareReadAndUpdate() throws Exception {
+        new MobileContractScenarios(mvc).profileAliasesReadAndUpdateTheSameAccount();
+    }
+    @Test void mobileProfileAliasesRequireJwt() throws Exception {
+        new MobileContractScenarios(mvc).bothProfileAliasesRequireBearerJwt();
+    }
+    @Test void mobileProfileIdentityAndValidationAreIsolated() throws Exception {
+        new MobileContractScenarios(mvc).profileIdentityAndValidationStayIsolated();
+    }
+    @Test void mobilePointDistancesAreNumericStableAndConsistent() throws Exception {
+        new MobileContractScenarios(mvc).everyPointHasTheSameStableNumericDistanceInListAndDetail();
     }
 
 }

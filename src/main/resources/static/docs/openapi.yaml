@@ -103,6 +103,63 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/user:
+    get:
+      tags: [Usuários]
+      operationId: getUserProfile
+      summary: Consultar o perfil pelo contrato mobile (bootstrap e postgres)
+      description: Retorna exclusivamente o usuário identificado pelo JWT, sem receber ID como parâmetro. Mesmo contrato de GET /api/v1/users/me, preservado para compatibilidade.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Perfil do usuário autenticado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileResponse'
+              examples:
+                Profile:
+                  $ref: '#/components/examples/Profile'
+        '401':
+          $ref: '#/components/responses/IdentityUnauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    put:
+      tags: [Usuários]
+      operationId: updateUserProfile
+      summary: Atualizar o perfil pelo contrato mobile (bootstrap e postgres)
+      description: Atualiza nome e e-mail exclusivamente do titular do JWT. Mesmo corpo e resposta de PUT /api/v1/users/me, preservado para compatibilidade. O token continua identificando a mesma conta após a alteração.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: Perfil atualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileResponse'
+              examples:
+                Profile:
+                  $ref: '#/components/examples/Profile'
+        '400':
+          $ref: '#/components/responses/EmailBadRequest'
+        '401':
+          $ref: '#/components/responses/IdentityUnauthorized'
+        '409':
+          $ref: '#/components/responses/EmailConflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/users/me:
     get:
       tags: [Usuários]
@@ -160,7 +217,10 @@ paths:
       tags: [Pontos de coleta]
       operationId: listCollectionPoints
       summary: Listar pontos de coleta (implementado no bootstrap e postgres)
-      description: Nos perfis bootstrap e postgres, a consulta funciona sem JWT e retorna [] quando a lista está vazia.
+      description: |
+        Nos perfis bootstrap e postgres, a consulta funciona sem JWT e retorna [] quando a lista está vazia.
+        distanceFromUserLocation é uma distância simulada em quilômetros, estável pelo ID do ecoponto.
+        Não usa localização do usuário e não representa distância real ou trajeto por ruas.
       security: []
       responses:
         '200':
@@ -184,7 +244,10 @@ paths:
       tags: [Pontos de coleta]
       operationId: getCollectionPoint
       summary: Consultar ponto de coleta, categorias aceitas e coletores (implementado no bootstrap e postgres)
-      description: Nos perfis bootstrap e postgres, a consulta funciona sem JWT. Um ID positivo inexistente retorna 404.
+      description: |
+        Nos perfis bootstrap e postgres, a consulta funciona sem JWT. Um ID positivo inexistente retorna 404.
+        distanceFromUserLocation é a mesma distância simulada em quilômetros exibida na listagem.
+        Não usa localização do usuário e não representa distância real ou trajeto por ruas.
       security: []
       responses:
         '200':
@@ -1227,6 +1290,7 @@ components:
         latitude: -20.4628
         longitude: -54.6152
         isActive: true
+        distanceFromUserLocation: 1.2
     CollectionPoint:
       summary: Exemplo ilustrativo no perfil postgres; IDs, horários e catálogo variam.
       value:
@@ -1236,6 +1300,7 @@ components:
         latitude: -20.4628
         longitude: -54.6152
         isActive: true
+        distanceFromUserLocation: 1.2
         acceptedCategoryIds:
         - 1
         - 2
@@ -1516,9 +1581,16 @@ components:
           description: Tempo de validade em segundos.
           example: 3600
 
+    SimulatedDistanceKm:
+      type: number
+      format: double
+      minimum: 0
+      readOnly: true
+      description: Distância simulada em quilômetros para demonstração do MVP. Determinística pelo ID do ecoponto, idêntica na lista e no detalhe em ambos os perfis. Não usa GPS e não representa localização real, distância calculada ou trajeto por ruas.
+      example: 1.2
     CollectionPointResponse:
       type: object
-      required: [id, name, address, latitude, longitude, isActive]
+      required: [id, name, address, latitude, longitude, isActive, distanceFromUserLocation]
       properties:
         id:
           $ref: '#/components/schemas/EntityId'
@@ -1538,6 +1610,8 @@ components:
           maximum: 180
         isActive:
           type: boolean
+        distanceFromUserLocation:
+          $ref: '#/components/schemas/SimulatedDistanceKm'
     CollectionPointDetailResponse:
       allOf:
         - $ref: '#/components/schemas/CollectionPointResponse'

@@ -15,6 +15,8 @@ import org.springframework.stereotype.Service;
 @Profile({"bootstrap", "postgres"})
 public class CollectionPointService {
 
+    private static final List<Double> SIMULATED_DISTANCES_KM = List.of(1.2, 3.5, 5.0, 7.4);
+
     private final CollectionPointRepository repository;
 
     public CollectionPointService(CollectionPointRepository repository) {
@@ -24,7 +26,7 @@ public class CollectionPointService {
     public List<CollectionPointResponse> listPoints() {
         return repository.findAllPoints().stream()
                 .map(point -> new CollectionPointResponse(point.id(), point.name(), point.address(),
-                        point.latitude(), point.longitude(), point.active()))
+                        point.latitude(), point.longitude(), point.active(), simulatedDistanceKm(point.id())))
                 .toList();
     }
 
@@ -43,6 +45,12 @@ public class CollectionPointService {
                 .map(device -> new CollectionDeviceResponse(device.deviceId(), device.active()))
                 .toList();
         return new CollectionPointDetailResponse(point.id(), point.name(), point.address(),
-                point.latitude(), point.longitude(), point.active(), point.acceptedCategoryIds(), devices);
+                point.latitude(), point.longitude(), point.active(), point.acceptedCategoryIds(), devices,
+                simulatedDistanceKm(point.id()));
+    }
+
+    private double simulatedDistanceKm(Long pointId) {
+        // Demonstration only: the same ID selects the same value in either profile, without user location.
+        return SIMULATED_DISTANCES_KM.get(Math.floorMod(pointId - 1, SIMULATED_DISTANCES_KM.size()));
     }
 }

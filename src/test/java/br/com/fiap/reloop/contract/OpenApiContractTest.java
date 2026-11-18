@@ -43,6 +43,36 @@ class OpenApiContractTest {
         for (JsonNode child : node) checkReferences(child);
     }
 
+    @Test void mobileProfileAliasesKeepTheOriginalContractsAndJwtSecurity() {
+        JsonNode mobile = DOCUMENT.at("/paths/~1api~1v1~1user");
+        JsonNode legacy = DOCUMENT.at("/paths/~1api~1v1~1users~1me");
+        for (String method : List.of("get", "put")) {
+            JsonNode alias = mobile.path(method);
+            JsonNode original = legacy.path(method);
+            assertThat(alias.isMissingNode()).isFalse();
+            assertThat(alias.path("responses")).isEqualTo(original.path("responses"));
+            assertThat(alias.path("requestBody")).isEqualTo(original.path("requestBody"));
+            assertThat(alias.path("security")).isEqualTo(DOCUMENT.path("security"));
+            assertThat(alias.has("parameters")).isFalse();
+            assertThat(alias.path("operationId")).isNotEqualTo(original.path("operationId"));
+        }
+    }
+
+    @Test void collectionDistanceIsRequiredNumericAndExplicitlySimulated() {
+        JsonNode point = DOCUMENT.at("/components/schemas/CollectionPointResponse");
+        assertThat(point.path("required")).anySatisfy(field -> assertThat(field.asText()).isEqualTo("distanceFromUserLocation"));
+        JsonNode distance = resolve(point.at("/properties/distanceFromUserLocation"));
+        assertThat(distance.path("type").asText()).isEqualTo("number");
+        assertThat(distance.path("minimum").asDouble()).isZero();
+        assertThat(distance.path("description").asText()).contains("simulada", "quilômetros", "Não usa GPS", "não representa", "trajeto por ruas");
+        assertThat(DOCUMENT.at("/components/schemas/CollectionPointDetailResponse/allOf/0/$ref").asText())
+                .isEqualTo("#/components/schemas/CollectionPointResponse");
+        JsonNode listExample = DOCUMENT.at("/components/examples/CollectionPoints/value/0/distanceFromUserLocation");
+        JsonNode detailExample = DOCUMENT.at("/components/examples/CollectionPoint/value/distanceFromUserLocation");
+        assertThat(listExample.isNumber()).isTrue();
+        assertThat(detailExample).isEqualTo(listExample);
+    }
+
     @ParameterizedTest(name = "{1} {0}: response examples and authentication")
     @MethodSource("operations")
     void everyOperationHasContextualResponseExamples(String path, String method, JsonNode operation) {

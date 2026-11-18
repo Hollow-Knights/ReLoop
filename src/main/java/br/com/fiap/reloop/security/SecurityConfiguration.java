@@ -49,6 +49,8 @@ public class SecurityConfiguration {
                 paths.matcher(HttpMethod.DELETE, "/api/v1/disposals/{id}"),
                 paths.matcher(HttpMethod.GET, "/api/v1/users/me/disposals"));
         var profileRequests = new OrRequestMatcher(
+                paths.matcher(HttpMethod.GET, "/api/v1/user"),
+                paths.matcher(HttpMethod.PUT, "/api/v1/user"),
                 paths.matcher(HttpMethod.GET, "/api/v1/users/me"),
                 paths.matcher(HttpMethod.PUT, "/api/v1/users/me"));
         var walletAndRewardRequests = new OrRequestMatcher(
