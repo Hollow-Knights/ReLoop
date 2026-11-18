@@ -1,0 +1,106 @@
+package br.com.fiap.reloop.postgres;
+
+import static org.assertj.core.api.Assertions.*;
+import java.net.URI;
+import java.net.http.*;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.util.*;
+import br.com.fiap.reloop.ReLoopApplication;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.boot.builder.SpringApplicationBuilder;
+import org.springframework.boot.web.context.WebServerApplicationContext;
+import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.core.env.MapPropertySource;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.MountableFile;
+
+/** Real TCP requests with the first application fully stopped before the second starts. */
+@Testcontainers
+class PostgresRestartHttpTest {
+    @Container static final PostgreSQLContainer<?> DB=new PostgreSQLContainer<>("postgres:16.11-alpine3.23")
+            .withCopyFileToContainer(MountableFile.forHostPath(Path.of("database/hiago/database.sql").toAbsolutePath()),
+                    "/docker-entrypoint-initdb.d/01-hiago.sql");
+    private final HttpClient http=HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(10)).build();
+    private final ObjectMapper mapper=new ObjectMapper();
+    private static final String PASSWORD="Senha123!";
+    private String base;
+    private String key;
+    private ConfigurableApplicationContext start(Map<String,Object> properties) {
+        var context=new SpringApplicationBuilder(ReLoopApplication.class).profiles("postgres")
+                .initializers(c->c.getEnvironment().getPropertySources().addFirst(new MapPropertySource("restart-http-test",properties))).run();
+        base="http://127.0.0.1:"+((WebServerApplicationContext)context).getWebServer().getPort();
+        return context;
+    }
+    private JsonNode send(String method,String path,String token,String deviceKey,String idempotency,String contentType,byte[] bytes,int expected) throws Exception {
+        var request=HttpRequest.newBuilder(URI.create(base+path)).timeout(java.time.Duration.ofSeconds(20));
+        if(token!=null) request.header("Authorization","Bearer "+token);
+        if(deviceKey!=null) request.header("X-Device-Key",deviceKey);
+        if(idempotency!=null) request.header("Idempotency-Key",idempotency);
+        if(contentType!=null) request.header("Content-Type",contentType);
+        var response=http.send(request.method(method,bytes==null?HttpRequest.BodyPublishers.noBody():HttpRequest.BodyPublishers.ofByteArray(bytes)).build(),
+                HttpResponse.BodyHandlers.ofByteArray());
+        assertThat(response.statusCode()).isEqualTo(expected);
+        return response.body().length==0?null:mapper.readTree(response.body());
+    }
+    private JsonNode json(String path,String token,String idempotency,Object payload,int expected) throws Exception {
+        return send("POST",path,token,null,idempotency,"application/json",payload==null?null:mapper.writeValueAsBytes(payload),expected);
+    }
+    private String login(String email) throws Exception {
+        return json("/api/v1/auth/login",null,null,Map.of("email",email,"password",PASSWORD),200).get("accessToken").asText();
+    }
+    private JsonNode event(long id,String eventId,String type,String weight) throws Exception {
+        var payload=new HashMap<String,Object>();
+        payload.put("eventId",eventId);payload.put("deviceId","COL-001");payload.put("disposalId",id);payload.put("eventType",type);
+        if(weight!=null) payload.put("weightKg",new java.math.BigDecimal(weight));
+        return send("POST","/api/v1/iot/events",null,key,null,"application/json",mapper.writeValueAsBytes(payload),200);
+    }
+    @Test void committedFlowSurvivesFullShutdownAndRestartOverRealHttp(@TempDir Path files) throws Exception {
+        byte[] secret=new byte[32];new java.security.SecureRandom().nextBytes(secret);
+        key=UUID.randomUUID().toString();
+        var properties=new HashMap<String,Object>();
+        properties.put("spring.datasource.url",DB.getJdbcUrl());properties.put("spring.datasource.username",DB.getUsername());
+        properties.put("spring.datasource.password",DB.getPassword());properties.put("reloop.jwt.secret",Base64.getEncoder().encodeToString(secret));
+        properties.put("reloop.iot.device-key",key);properties.put("reloop.iot.device-id","COL-001");
+        properties.put("reloop.photo.storage-dir",files.toString());properties.put("reloop.photo.base-url","http://localhost:8080");
+        properties.put("server.address","127.0.0.1");properties.put("server.port",0);properties.put("spring.main.banner-mode","off");
+        properties.put("logging.level.root","WARN");
+        String email=UUID.randomUUID()+"@example.test";long id;String photo;JsonNode originalCoupon;
+        byte[] image;
+        try(var application=start(properties)) {
+            json("/api/v1/auth/register",null,null,Map.of("name","Restart","email",email,"password",PASSWORD),201);
+            String token=login(email);
+            var output=new java.io.ByteArrayOutputStream();
+            javax.imageio.ImageIO.write(new java.awt.image.BufferedImage(2,2,java.awt.image.BufferedImage.TYPE_INT_RGB),"png",output);
+            image=output.toByteArray();
+            String boundary="reloop-"+UUID.randomUUID();
+            var multipart=new java.io.ByteArrayOutputStream();
+            multipart.write(("--"+boundary+"\r\nContent-Disposition: form-data; name=\"file\"; filename=\"notebook.png\"\r\nContent-Type: image/png\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+            multipart.write(image);multipart.write(("\r\n--"+boundary+"--\r\n").getBytes(StandardCharsets.US_ASCII));
+            photo=send("POST","/api/v1/uploads",token,null,null,"multipart/form-data; boundary="+boundary,multipart.toByteArray(),201).get("photoId").asText();
+            id=json("/api/v1/disposals",token,null,Map.of("deviceId","COL-001","categoryId",2,"itemName","Notebook","photoId",photo),201).get("id").asLong();
+            assertThat(event(id,"weight","WEIGHT_RECORDED","2.300").get("estimatedPoints").asInt()).isEqualTo(83);
+            event(id,"open","DOOR_OPENED",null);event(id,"close","DOOR_CLOSED",null);
+            originalCoupon=json("/api/v1/rewards/2/redeem",token,"restart-key",null,201);
+            assertThat(originalCoupon.get("remainingPoints").asInt()).isEqualTo(3);
+        }
+        // The previous server, entity manager factory and connection pool have all been closed.
+        try(var restarted=start(properties)) {
+            String token=login(email);
+            var download=http.send(HttpRequest.newBuilder(URI.create(base+"/api/v1/uploads/"+photo))
+                    .header("Authorization","Bearer "+token).GET().build(),HttpResponse.BodyHandlers.ofByteArray());
+            assertThat(download.statusCode()).isEqualTo(200);assertThat(download.body()).isEqualTo(image);
+            assertThat(event(id,"close","DOOR_CLOSED",null).get("awardedPoints").asInt()).isEqualTo(83);
+            assertThat(event(id,"weight","WEIGHT_RECORDED","2.300").get("status").asText()).isEqualTo("WAITING_DEPOSIT");
+            assertThat(json("/api/v1/rewards/2/redeem",token,"restart-key",null,201)).isEqualTo(originalCoupon);
+            var wallet=send("GET","/api/v1/users/me/wallet",token,null,null,null,null,200);
+            assertThat(wallet.get("availablePoints").asInt()).isEqualTo(3);
+            assertThat(wallet.get("transactions").size()).isEqualTo(2);
+        }
+    }
+}
