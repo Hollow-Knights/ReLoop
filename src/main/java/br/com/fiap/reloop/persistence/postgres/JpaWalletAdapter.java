@@ -12,6 +12,7 @@ import br.com.fiap.reloop.wallet.repository.WalletRepository;
 import jakarta.persistence.EntityManager;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Repository
@@ -32,8 +33,9 @@ public class JpaWalletAdapter implements WalletRepository {
         entityManager.createNativeQuery("insert into wallets (user_id) values (:user) on conflict (user_id) do nothing")
                 .setParameter("user", userId).executeUpdate();
     }
-    @Override @Transactional(readOnly = true)
+    @Override @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public Optional<Wallet> findByUserId(Long userId) {
+        // Keep the aggregate and its ledger on one snapshot, even if a writer commits between the SELECTs.
         return wallets.findByUserId(userId).map(row -> new Wallet(row.userId, row.totalEarned, row.totalRedeemed,
                 transactions.findByWalletIdOrderByCreatedAtDescIdDesc(row.id).stream().map(t -> new PointTransaction(
                         t.id, t.type, t.points, t.description, t.createdAt, t.disposalId, t.redemptionId)).toList()));

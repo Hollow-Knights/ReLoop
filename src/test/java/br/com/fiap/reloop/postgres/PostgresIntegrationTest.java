@@ -18,6 +18,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import br.com.fiap.reloop.persistence.postgres.JpaStores;
+import static org.mockito.Mockito.doAnswer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.MockMvcPrint;
@@ -51,6 +54,7 @@ class PostgresIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper mapper;
     @Autowired JdbcTemplate jdbc;
+    @MockitoSpyBean JpaStores.Transactions transactionRows;
 
     private static String secret() {
         byte[] bytes = new byte[32]; new SecureRandom().nextBytes(bytes);
@@ -140,6 +144,56 @@ class PostgresIntegrationTest {
             for (var future : executor.invokeAll(tasks, 45, TimeUnit.SECONDS)) results.add(future.get());
             return results;
         } finally {
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @Test void walletReadKeepsOneSnapshotWhenRedemptionCommitsBetweenItsSelects() throws Exception {
+        String token = register();
+        complete(start(token));
+        long userId = body(mvc.perform(get("/api/v1/users/me").header("Authorization", auth(token)))
+                .andExpect(status().isOk()).andReturn()).get("id").asLong();
+        long walletId = jdbc.queryForObject("SELECT id FROM wallets WHERE user_id=?", Long.class, userId);
+        var beforeLedger = new CountDownLatch(1);
+        var writerCommitted = new CountDownLatch(1);
+        var intercept = new java.util.concurrent.atomic.AtomicBoolean(true);
+        var isolation = new java.util.concurrent.atomic.AtomicReference<String>();
+        var realQuery = org.mockito.Mockito.mockingDetails(transactionRows).getMockCreationSettings().getDefaultAnswer();
+        doAnswer(invocation -> {
+            if (intercept.compareAndSet(true, false)) {
+                isolation.set(jdbc.queryForObject("SHOW transaction_isolation", String.class));
+                beforeLedger.countDown();
+                assertThat(writerCommitted.await(15, TimeUnit.SECONDS)).isTrue();
+            }
+            return realQuery.answer(invocation);
+        }).when(transactionRows).findByWalletIdOrderByCreatedAtDescIdDesc(walletId);
+        var executor = Executors.newSingleThreadExecutor(Thread.ofPlatform().daemon(true).factory());
+        try {
+            var read = executor.submit(() -> body(mvc.perform(get("/api/v1/users/me/wallet")
+                    .header("Authorization", auth(token))).andExpect(status().isOk()).andReturn()));
+            assertThat(beforeLedger.await(15, TimeUnit.SECONDS)).isTrue();
+            try {
+                redeem(mvc, token, "snapshot-race", 2).andExpect(status().isCreated())
+                        .andExpect(jsonPath("$.remainingPoints").value(3));
+                // The writer has returned after committing, while the reader is still inside its transaction.
+                assertThat(jdbc.queryForObject("SELECT available_points FROM wallets WHERE id=?", Integer.class, walletId))
+                        .isEqualTo(3);
+            } finally {
+                writerCommitted.countDown();
+            }
+            var snapshot = read.get(20, TimeUnit.SECONDS);
+            assertThat(snapshot.get("availablePoints").asInt()).isEqualTo(83);
+            assertThat(snapshot.get("totalEarned").asInt()).isEqualTo(83);
+            assertThat(snapshot.get("totalRedeemed").asInt()).isZero();
+            assertThat(snapshot.get("transactions").size()).isEqualTo(1);
+            assertThat(snapshot.get("transactions").get(0).get("type").asText()).isEqualTo("CREDIT");
+            assertThat(isolation.get()).isEqualTo("repeatable read");
+            mvc.perform(get("/api/v1/users/me/wallet").header("Authorization", auth(token))).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.availablePoints").value(3)).andExpect(jsonPath("$.totalRedeemed").value(80))
+                    .andExpect(jsonPath("$.transactions.length()").value(2));
+        } finally {
+            writerCommitted.countDown();
             executor.shutdownNow();
             assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
         }
