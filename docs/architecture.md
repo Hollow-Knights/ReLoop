@@ -26,6 +26,7 @@ Boot para escrever erros JSON.
 | `upload` | Recepção de fotos e verificação de titularidade. |
 | `security` | Emissão e validação de JWT, identidade do usuário e controle de acesso HTTP. |
 | `shared.web` | Modelo de erro HTTP e tratamento de exceções MVC. |
+| `persistence.postgres` | Entidades/stores Spring Data JPA e adaptadores das interfaces de domínio, transações e armazenamento durável. |
 
 ## Camadas
 
@@ -49,8 +50,8 @@ chamar serviços de outros módulos. O contrato HTTP versionado fica no
 ## Fluxo de descarte
 
 1. O cidadão cadastra a conta e recebe uma carteira vazia. A criação da
-   conta e da carteira deve compartilhar a mesma transação quando os
-   adaptadores PostgreSQL forem integrados. Após o login, o cliente envia
+   conta e da carteira compartilha a mesma transação nos adaptadores
+   PostgreSQL. Após o login, o cliente envia
    o JWT nas rotas protegidas.
 2. O aplicativo consulta os pontos e as categorias. Ao escanear o QR Code,
    obtém o identificador do coletor, por exemplo, `COL-001`.
@@ -118,8 +119,8 @@ Para um pequeno eletrodoméstico de 3,8 kg dentro dos limites da categoria,
   débito e emite o cupom na mesma transação. Em uma repetição idêntica, devolve
   o cupom e o saldo registrados no resgate original. Operações concorrentes
   são serializadas pelo monitor compartilhado no `bootstrap`. O resgate
-  resolve a chave antes de ler saldo ou estoque. Com PostgreSQL, a operação
-  deverá usar uma transação real e as constraints de unicidade.
+  resolve a chave antes de ler saldo ou estoque. No PostgreSQL, a operação
+  usa transação real, bloqueios de linhas e constraints de unicidade.
 
 Uma `Wallet` pertence ao usuário e resume o total ganho e o total resgatado.
 Uma `PointTransaction` registra a movimentação individual com origem no
@@ -137,8 +138,8 @@ a ausência de um ponto para HTTP 404, formatado pelo tratamento de erros
 compartilhado.
 
 No perfil `bootstrap`, `InMemoryCollectionCatalog` fornece as duas
-interfaces a partir de listas imutáveis. O futuro adaptador PostgreSQL
-implementará as mesmas interfaces com Spring Data JPA. Ele deverá fornecer
+interfaces a partir de listas imutáveis. O adaptador `JpaCatalogAdapter`
+implementa as mesmas interfaces com Spring Data JPA no perfil `postgres`. Ele fornece
 os modelos de leitura do catálogo, incluindo as categorias aceitas e os
 coletores no detalhe de um ponto. O fluxo de descarte consulta os
 parâmetros da categoria no momento da pesagem.
@@ -180,3 +181,19 @@ titularidade. O repositório cria o descarte e garante, em uma única seção
 sincronizada, a exclusividade da foto e da sessão ativa do coletor.
 O cancelamento atualiza o estado somente de `WAITING_WEIGHT` para
 `CANCELLED`. A foto continua vinculada e o coletor volta a ficar disponível.
+
+## Persistência PostgreSQL
+
+O perfil `postgres` habilita os mesmos controllers e serviços da main, com
+adaptadores JPA em `persistence.postgres`. O perfil `bootstrap` conserva os
+adaptadores em memória. Selecione apenas um por execução. O SQL original do
+Hiago é inicializado explicitamente uma vez; Hibernate usa `ddl-auto=validate`.
+
+Os limites transacionais ficam nos adaptadores de escrita das interfaces
+de domínio. IoT bloqueia a chave do evento no banco, depois descarte e carteira;
+resgates bloqueiam carteira antes de recompensa. Não se utilizam os monitores
+do bootstrap para proteger operações PostgreSQL. Fotografias possuem bytes
+duráveis fora do Git, com metadados no banco e compensação em rollback.
+
+O [guia de integração](database/postgres-integration.md) descreve o mapeamento,
+locks, decisões de precisão, inicialização, testes e limitações dos dados recebidos.

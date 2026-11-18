@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/v1")
-@Profile("bootstrap")
+@Profile({"bootstrap", "postgres"})
 public class DisposalController {
 
     private final DisposalService service;

@@ -27,7 +27,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.util.UriComponentsBuilder;
 
 @Service
-@Profile("bootstrap")
+@Profile({"bootstrap", "postgres"})
 public class PhotoService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(PhotoService.class);

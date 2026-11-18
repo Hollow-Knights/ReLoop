@@ -14,6 +14,7 @@ quais operações estão implementadas e quais ainda estão planejadas.
 ## Pré-requisitos
 
 - JDK 21 e Git.
+- Docker Desktop em execução para os testes PostgreSQL e o banco de desenvolvimento.
 - Acesso ao Maven Central na primeira compilação, para baixar o Maven e as dependências.
 - PostgreSQL e o esquema fornecido pela equipe, quando for usar o perfil `postgres`.
 
@@ -37,12 +38,12 @@ fixado no repositório, com verificação SHA-256.
 | --- | --- |
 | Java 21 e Spring Boot 3.5.16 | Inicialização, autoconfiguração e servidor Tomcat embutido. |
 | Spring Web MVC e Jackson | Tratamento de requisições HTTP e serialização JSON. |
-| Spring Data JPA, Hibernate e driver PostgreSQL | Acesso futuro ao banco relacional. |
+| Spring Data JPA, Hibernate e driver PostgreSQL | Persistência e transações no perfil postgres. |
 | Spring Security e OAuth2 Resource Server | Hash de senha, emissão e validação de JWT e controle de acesso. |
 | Jakarta Bean Validation | Validação declarativa nos DTOs quando as rotas forem implementadas. |
 | springdoc OpenAPI 2.10.0 | Swagger UI apontado para o contrato YAML versionado. |
 | Spring Boot Actuator | Health check operacional. |
-| Spring Boot Test e Spring Security Test | Base de JUnit 5, Mockito e testes de segurança para as próximas entregas. |
+| Spring Boot Test, Spring Security Test e Testcontainers | Testes HTTP, segurança e integração com PostgreSQL real. |
 
 ## Executar sem banco
 
@@ -115,9 +116,9 @@ anterior.
 ## Consultar o catálogo
 
 No perfil `bootstrap`, as três consultas aceitam chamadas sem JWT e retornam
-dados fictícios. Fora desse perfil, o filtro exige autenticação para o
-catálogo. A disponibilização nesses ambientes depende do adaptador
-PostgreSQL e da configuração de segurança correspondente.
+dados fictícios. No perfil `postgres`, as mesmas consultas públicas leem
+as tabelas do SQL do Hiago. As demais rotas mantêm a proteção JWT ou a
+credencial IoT descrita neste documento.
 
 ```sh
 curl -fsS http://localhost:8080/api/v1/collection-points
@@ -342,62 +343,49 @@ fictícios, incluindo um benefício inativo e outro com estoque inicial de uma
 unidade. A carteira, o catálogo e os resgates ficam em memória no
 `bootstrap`; o reinício restaura o catálogo inicial.
 
-## Integrar com PostgreSQL
+## Executar com PostgreSQL
 
-Um profile é um conjunto de configurações ativado na inicialização. Escolha
-um perfil por execução. O `bootstrap` desativa as autoconfigurações de
-`DataSource` e JPA e habilita o Swagger UI. O `postgres` usa o driver JDBC
-e o pool de conexões configurado pelo Spring Boot para acessar o banco.
-O Hibernate usará `ddl-auto=validate` para conferir as entidades mapeadas
-contra o esquema fornecido pela equipe. A aplicação mantém a inicialização
-automática por scripts SQL desativada.
+O perfil `postgres` usa o [SQL original do Hiago](database/schema/database.sql),
+Spring Data JPA, transações reais e armazenamento durável de fotografias.
+Mantém as rotas da main: upload separado, criação de descarte com `photoId`,
+perfil em `/api/v1/users/me` e resgates em `/api/v1/rewards/{id}/redeem`.
 
-Quando a equipe disponibilizar o esquema, aplique-o no PostgreSQL e configure
-a URL, o usuário e a senha fornecidos para o ambiente. É possível usar a
-cópia local de [.env.example](.env.example). O Spring Boot lê as variáveis
-exportadas pelo shell. Use os comandos abaixo no macOS ou Linux.
+Leia o [guia de integração PostgreSQL](docs/database/postgres-integration.md)
+para criar o banco uma única vez com Docker Compose, configurar o `.env`
+e executar no Mac. O Hibernate usa somente `ddl-auto=validate`; a aplicação
+não executa DDL ou seed na inicialização. As fotos exigem `PHOTO_STORAGE_DIR`
+persistente. Não ative `bootstrap` e `postgres` juntos.
+
+O inicializador aguarda o healthcheck TCP do banco, com limite padrão de
+60 segundos (`POSTGRES_INIT_TIMEOUT_SECONDS`, exportada no shell). Falha ou
+timeout interrompe a operação antes de executar SQL. Use-o somente em banco
+vazio; para bancos já preenchidos, inicie apenas o serviço com
+`docker compose up -d --wait --wait-timeout 60 postgres` e execute o backend.
+
+Os catálogos diferem entre os perfis. No SQL, o exemplo testado é Notebook,
+categoria 2, peso 2,300 kg, crédito 83, resgate de 80 e saldo 3. Os hashes e
+arquivos de fotos dos usuários demonstrativos têm as limitações documentadas
+no guia; use cadastro/upload novos para a jornada.
+
+Pesos aceitam no máximo três casas decimais em ambos os perfis. Precisão
+excedente retorna 400 sem arredondamento; a fórmula de pontos permanece igual.
+
+## Testes automatizados
+
+Com Java 21 e Docker Desktop ativo:
 
 ```sh
-cp .env.example .env
-# Preencha DB_URL, DB_USERNAME e DB_PASSWORD em .env com valores válidos para o shell.
-set -a
-. ./.env
-set +a
-./mvnw spring-boot:run
+./mvnw clean verify
 ```
 
-O exemplo define `SPRING_PROFILES_ACTIVE=postgres`. Guarde as credenciais
-em arquivos locais ignorados pelo Git ou no gerenciador de segredos do
-ambiente. A proposta de [esquema PostgreSQL](docs/database/schema-contract.md)
-serve de referência para o alinhamento com a equipe de banco.
+Os testes usam PostgreSQL real em contêineres descartáveis e um diretório de
+fotos temporário. Não precisam de `.env`, banco criado manualmente ou JWT
+externo. Incluem concorrência, rollback e reinício com HTTP real, além da
+regressão bootstrap. Após a auditoria, a suíte tem 65 testes, incluindo leitura
+consistente de carteira, estados de conclusão de upload, inicialização limitada
+e casos negativos de JWT, IoT e fotografias. Os relatórios ficam em
+`target/surefire-reports`. Veja as [correções da auditoria](docs/database/postgres-audit-fixes.md).
 
-Os serviços do catálogo consultam as interfaces `CollectionPointRepository`
-e `ElectronicCategoryRepository`. Hoje, `InMemoryCollectionCatalog`
-implementa ambas com listas imutáveis carregadas no perfil `bootstrap`.
-Após a aprovação do esquema, implementações com Spring Data JPA para o
-perfil `postgres` poderão preencher os mesmos modelos de leitura. Nessa
-entrega futura, os controllers e services serão habilitados também em
-`postgres`. O [mapeamento de campos do catálogo](docs/database/schema-contract.md#campos-consumidos-pelo-catálogo)
-identifica os dados necessários para essa substituição.
-
-Para descartes, o adaptador PostgreSQL implementará `DisposalRepository`,
-mantendo a reserva do coletor e da foto atômica com o cadastro. Os metadados
-da foto poderão ser persistidos via `PhotoStorage` e o arquivo poderá usar
-armazenamento durável. `JwtCurrentUserProvider` já extrai a identidade
-autenticada do contexto do Spring Security. O adaptador PostgreSQL
-implementará `UserRepository` com unicidade de e-mail e persistência do
-hash. A criação da carteira com saldo zero deve ocorrer na mesma transação
-do cadastro.
-
-Para IoT, a implementação PostgreSQL de `IotEventRepository` precisa
-guardar o evento e seu resultado, atualizar o descarte e gravar o crédito
-na mesma transação. O contrato de persistência descreve os dados para o
-alinhamento com Hiago. A chave demonstrativa é exclusiva do `bootstrap`.
-Para carteira e recompensas, os adaptadores de `WalletRepository`,
-`RewardRepository` e `RedemptionRepository` usarão as tabelas
-`wallets`, `point_transactions`, `rewards` e `redemptions`.
-O resgate deverá gravar baixa de estoque, débito e cupom na mesma
-transação. Consulte as [constraints propostas](docs/database/schema-contract.md#carteira-benefícios-e-cupons).
 
 ## Estrutura
 

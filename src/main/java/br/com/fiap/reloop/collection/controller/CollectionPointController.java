@@ -16,7 +16,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/v1/collection-points")
-@Profile("bootstrap")
+@Profile({"bootstrap", "postgres"})
 public class CollectionPointController {
 
     private final CollectionPointService service;

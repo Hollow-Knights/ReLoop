@@ -1,5 +1,8 @@
 # Auditoria de preparação para PostgreSQL
 
+> Registro histórico do Bloco 7A, anterior ao recebimento do SQL.
+> O resultado atual, após o SQL do Hiago, está no [guia de integração](postgres-integration.md).
+
 ## Estado da integração
 
 A auditoria usou a `main` em `898b9d6`, que inclui o merge do PR #5 e os

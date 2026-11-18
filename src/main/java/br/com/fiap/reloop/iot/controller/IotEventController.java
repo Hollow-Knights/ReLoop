@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@Profile("bootstrap")
+@Profile({"bootstrap", "postgres"})
 public class IotEventController {
 
     private final IotEventService events;

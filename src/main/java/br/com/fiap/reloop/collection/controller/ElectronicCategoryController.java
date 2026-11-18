@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@Profile("bootstrap")
+@Profile({"bootstrap", "postgres"})
 public class ElectronicCategoryController {
 
     private final ElectronicCategoryService service;
