@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/v1/users/me")
-@Profile("bootstrap")
+@Profile({"bootstrap", "postgres"})
 public class UserController {
 
     private final UserService users;

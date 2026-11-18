@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -22,7 +23,7 @@ public record IotEventRequest(
         @JsonDeserialize(using = TextDeserializer.class) @NotBlank @Size(max = 64) String deviceId,
         @JsonDeserialize(using = DisposalIdDeserializer.class) @NotNull @Positive Long disposalId,
         @NotNull IotEventType eventType,
-        @JsonDeserialize(using = WeightDeserializer.class) @Positive BigDecimal weightKg) {
+        @JsonDeserialize(using = WeightDeserializer.class) @Positive @Digits(integer = 7, fraction = 3) BigDecimal weightKg) {
 
     @AssertTrue
     public boolean isWeightValidForEvent() {

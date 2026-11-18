@@ -24,7 +24,7 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 
 @Configuration
-@Profile("bootstrap")
+@Profile({"bootstrap", "postgres"})
 public class JwtConfiguration {
 
     private final String issuer = "urn:reloop:bootstrap:" + UUID.randomUUID();

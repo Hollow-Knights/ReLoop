@@ -13,7 +13,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 @Service
-@Profile("bootstrap")
+@Profile({"bootstrap", "postgres"})
 public class IotEventService {
 
     private final IotEventRepository events;

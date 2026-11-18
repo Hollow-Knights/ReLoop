@@ -8,7 +8,7 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.stereotype.Component;
 
 @Component
-@Profile("bootstrap")
+@Profile({"bootstrap", "postgres"})
 public class JwtCurrentUserProvider implements CurrentUserProvider {
 
     @Override

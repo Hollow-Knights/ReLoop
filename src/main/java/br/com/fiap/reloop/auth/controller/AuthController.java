@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping(path = "/api/v1/auth", consumes = MediaType.APPLICATION_JSON_VALUE)
-@Profile("bootstrap")
+@Profile({"bootstrap", "postgres"})
 public class AuthController {
 
     private final AuthService auth;

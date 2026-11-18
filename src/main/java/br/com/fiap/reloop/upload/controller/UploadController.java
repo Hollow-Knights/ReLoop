@@ -21,7 +21,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/v1/uploads")
-@Profile("bootstrap")
+@Profile({"bootstrap", "postgres"})
 public class UploadController {
 
     private final PhotoService photos;

@@ -34,7 +34,7 @@ public class SecurityConfiguration {
             ObjectMapper objectMapper,
             Environment environment,
             @Value("${springdoc.swagger-ui.enabled:false}") boolean documentationEnabled) throws Exception {
-        boolean bootstrap = environment.acceptsProfiles(Profiles.of("bootstrap"));
+        boolean apiEnabled = environment.acceptsProfiles(Profiles.of("bootstrap", "postgres"));
         var paths = PathPatternRequestMatcher.withDefaults();
         var catalogReads = new OrRequestMatcher(
                 paths.matcher(HttpMethod.GET, "/api/v1/collection-points"),
@@ -73,7 +73,7 @@ public class SecurityConfiguration {
                     invalidToken ? "INVALID_TOKEN" : "AUTHENTICATION_REQUIRED",
                     invalidToken ? "Token de acesso inválido ou expirado." : "Autenticação necessária."));
         };
-        if (bootstrap) {
+        if (apiEnabled) {
             http.addFilterBefore(new DeviceKeyFilter(iotEvents, objectMapper,
                     environment.getRequiredProperty("reloop.iot.device-id"),
                     environment.getRequiredProperty("reloop.iot.device-key")), AuthorizationFilter.class);
@@ -97,7 +97,7 @@ public class SecurityConfiguration {
                                 "/v3/api-docs/swagger-config",
                                 "/docs/openapi.yaml").permitAll();
                     }
-                    if (bootstrap) {
+                    if (apiEnabled) {
                         // O filtro IoT exige X-Device-Key antes que a requisição alcance o controller.
                         authorize.requestMatchers(catalogReads, publicAuth, iotEvents).permitAll();
                     } else {

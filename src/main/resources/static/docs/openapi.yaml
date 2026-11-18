@@ -5,12 +5,13 @@ info:
   description: |
     Contrato do MVP acadêmico Ecoponto (ReLoop). As operações implementadas
     estão identificadas nos resumos. No perfil local `bootstrap`, o catálogo
-    usa dados fictícios. Cadastro, login e catálogo são públicos nesse perfil.
+    usa dados fictícios; no `postgres`, usa o SQL do Hiago.
+    Cadastro, login e catálogo são públicos nesses dois perfis.
     Perfil, fotos, descartes, carteira, recompensas e resgates exigem
     `Authorization: Bearer <token>`.
     O endpoint IoT usa a credencial `X-Device-Key`.
-    Os usuários e seus dados são temporários. Configure `JWT_SECRET` para iniciar
-    o perfil `bootstrap`. O README descreve como gerar o segredo e testar com
+    No bootstrap os dados são temporários; no postgres são persistidos.
+    Configure `JWT_SECRET` para iniciar qualquer um desses perfis. O README descreve como gerar o segredo e testar com
     dois usuários.
     O Swagger UI disponibiliza os modelos para consulta. O health check está
     disponível em `/actuator/health`.
@@ -36,11 +37,12 @@ paths:
     post:
       tags: [Autenticação]
       operationId: register
-      summary: Cadastrar cidadão (implementado no bootstrap)
+      summary: Cadastrar cidadão (implementado no bootstrap e postgres)
       description: |
         Cria um usuário com e-mail normalizado em minúsculas e senha armazenada
         como hash. No bootstrap, o cadastro também abre uma carteira em
-        memória com saldo zero.
+        memória com saldo zero. No postgres, usuário e carteira são persistidos
+        na mesma transação.
       security: []
       requestBody:
         required: true
@@ -70,7 +72,7 @@ paths:
     post:
       tags: [Autenticação]
       operationId: login
-      summary: Autenticar cidadão (implementado no bootstrap)
+      summary: Autenticar cidadão (implementado no bootstrap e postgres)
       description: Valida o e-mail e a senha e emite um token de acesso válido por 3600 segundos.
       security: []
       requestBody:
@@ -101,7 +103,7 @@ paths:
     get:
       tags: [Usuários]
       operationId: getMyProfile
-      summary: Consultar o próprio perfil (implementado no bootstrap)
+      summary: Consultar o próprio perfil (implementado no bootstrap e postgres)
       responses:
         '200':
           description: Perfil do usuário autenticado.
@@ -116,7 +118,7 @@ paths:
     put:
       tags: [Usuários]
       operationId: updateMyProfile
-      summary: Atualizar o próprio perfil (implementado no bootstrap)
+      summary: Atualizar o próprio perfil (implementado no bootstrap e postgres)
       description: Atualiza o nome e o e-mail do titular. O token atual identifica a mesma conta após a alteração.
       requestBody:
         required: true
@@ -148,8 +150,8 @@ paths:
     get:
       tags: [Pontos de coleta]
       operationId: listCollectionPoints
-      summary: Listar pontos de coleta (implementado no bootstrap)
-      description: No perfil bootstrap, a consulta funciona sem JWT e retorna [] quando a lista está vazia.
+      summary: Listar pontos de coleta (implementado no bootstrap e postgres)
+      description: Nos perfis bootstrap e postgres, a consulta funciona sem JWT e retorna [] quando a lista está vazia.
       responses:
         '200':
           description: Locais de coleta.
@@ -170,8 +172,8 @@ paths:
     get:
       tags: [Pontos de coleta]
       operationId: getCollectionPoint
-      summary: Consultar ponto de coleta, categorias aceitas e coletores (implementado no bootstrap)
-      description: No perfil bootstrap, a consulta funciona sem JWT. Um ID positivo inexistente retorna 404.
+      summary: Consultar ponto de coleta, categorias aceitas e coletores (implementado no bootstrap e postgres)
+      description: Nos perfis bootstrap e postgres, a consulta funciona sem JWT. Um ID positivo inexistente retorna 404.
       responses:
         '200':
           description: Detalhes do local.
@@ -192,9 +194,9 @@ paths:
     get:
       tags: [Categorias]
       operationId: listElectronicCategories
-      summary: Listar categorias e parâmetros de pontuação (implementado no bootstrap)
+      summary: Listar categorias e parâmetros de pontuação (implementado no bootstrap e postgres)
       description: |
-        No perfil bootstrap, a consulta funciona sem JWT e retorna os parâmetros
+        Nos perfis bootstrap e postgres, a consulta funciona sem JWT e retorna os parâmetros
         armazenados no catálogo. Ao receber a pesagem, o backend valida
         o peso no intervalo inclusivo da categoria e calcula
         `min(maxPoints, roundHalfUp(basePoints + weightKg * pointsPerKg))`.
@@ -216,7 +218,7 @@ paths:
     post:
       tags: [Fotos]
       operationId: uploadPhoto
-      summary: Enviar foto do eletrônico (implementado no bootstrap)
+      summary: Enviar foto do eletrônico (implementado no bootstrap e postgres)
       description: |
         Recebe um arquivo JPEG ou PNG de 1 byte a 10 MiB. A foto é vinculada ao usuário
         atual e poderá ser associada a um descarte dele. A URL absoluta é retornada
@@ -260,7 +262,7 @@ paths:
     get:
       tags: [Fotos]
       operationId: getUploadedPhoto
-      summary: Consultar foto pela URL retornada no upload (implementado no bootstrap)
+      summary: Consultar foto pela URL retornada no upload (implementado no bootstrap e postgres)
       description: Disponibiliza a fotografia somente ao seu proprietário.
       parameters:
         - name: photoId
@@ -299,7 +301,7 @@ paths:
     post:
       tags: [Descartes]
       operationId: startDisposal
-      summary: Iniciar descarte (implementado no bootstrap)
+      summary: Iniciar descarte (implementado no bootstrap e postgres)
       description: |
         O coletor e seu ponto de coleta devem estar ativos, e o ponto deve aceitar
         a categoria. A foto deve pertencer ao cidadão e estar livre para associação.
@@ -349,7 +351,7 @@ paths:
     get:
       tags: [Descartes]
       operationId: getDisposal
-      summary: Consultar descarte do usuário atual (implementado no bootstrap)
+      summary: Consultar descarte do usuário atual (implementado no bootstrap e postgres)
       responses:
         '200':
           description: Estado atual do descarte do usuário.
@@ -368,7 +370,7 @@ paths:
     delete:
       tags: [Descartes]
       operationId: cancelDisposal
-      summary: Cancelar descarte que aguarda pesagem (implementado no bootstrap)
+      summary: Cancelar descarte que aguarda pesagem (implementado no bootstrap e postgres)
       description: O registro do usuário passa de WAITING_WEIGHT para CANCELLED, permanece no histórico e libera o coletor.
       responses:
         '204':
@@ -388,7 +390,7 @@ paths:
     get:
       tags: [Descartes]
       operationId: listMyDisposals
-      summary: Listar histórico de descartes do usuário atual (implementado no bootstrap)
+      summary: Listar histórico de descartes do usuário atual (implementado no bootstrap e postgres)
       responses:
         '200':
           description: Descartes do usuário do mais recente ao mais antigo, inclusive os cancelados. Retorna um array vazio se não houver registros.
@@ -407,7 +409,7 @@ paths:
     post:
       tags: [IoT]
       operationId: receiveIotEvent
-      summary: Receber evento do coletor simulado (implementado no bootstrap)
+      summary: Receber evento do coletor simulado (implementado no bootstrap e postgres)
       description: |
         A credencial deve autorizar o `deviceId`, que deve corresponder ao coletor
         do descarte. As transições são WEIGHT_RECORDED (WAITING_WEIGHT →
@@ -494,7 +496,7 @@ paths:
     get:
       tags: [Carteira]
       operationId: getMyWallet
-      summary: Consultar saldo e movimentações (implementado no bootstrap)
+      summary: Consultar saldo e movimentações (implementado no bootstrap e postgres)
       description: Retorna o saldo do titular e as movimentações da mais recente para a mais antiga.
       responses:
         '200':
@@ -512,7 +514,7 @@ paths:
     get:
       tags: [Recompensas]
       operationId: listRewards
-      summary: Listar benefícios (implementado no bootstrap)
+      summary: Listar benefícios (implementado no bootstrap e postgres)
       description: Exibe custo, estoque e situação de cada benefício fictício.
       responses:
         '200':
@@ -534,7 +536,7 @@ paths:
     post:
       tags: [Recompensas]
       operationId: redeemReward
-      summary: Resgatar benefício (implementado no bootstrap)
+      summary: Resgatar benefício (implementado no bootstrap e postgres)
       description: |
         Envie a mesma Idempotency-Key ao repetir uma tentativa de resgate. A
         chave é vinculada ao usuário autenticado. Repetir a chave para o mesmo
@@ -578,7 +580,7 @@ paths:
     get:
       tags: [Recompensas]
       operationId: listMyRedemptions
-      summary: Listar cupons do usuário autenticado (implementado no bootstrap)
+      summary: Listar cupons do usuário autenticado (implementado no bootstrap e postgres)
       description: Retorna os resgates do titular, do mais recente para o mais antigo.
       responses:
         '200':
@@ -685,14 +687,18 @@ components:
       type: number
       minimum: 0
       exclusiveMinimum: true
-      description: Peso decimal positivo em kg, representado por BigDecimal no backend.
+      multipleOf: 0.001
+      maximum: 9999999.999
+      description: Peso positivo em kg com no máximo três casas decimais; excesso de precisão retorna 400, sem arredondamento.
       example: 3.8
     NullableWeightKg:
       type: number
       nullable: true
       minimum: 0
       exclusiveMinimum: true
-      description: Peso decimal positivo em kg ou null enquanto aguarda pesagem.
+      multipleOf: 0.001
+      maximum: 9999999.999
+      description: Peso positivo em kg com no máximo três casas decimais ou null enquanto aguarda pesagem.
       example: 3.8
     NullablePoints:
       type: integer

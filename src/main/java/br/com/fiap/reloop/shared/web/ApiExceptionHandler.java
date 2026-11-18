@@ -1,5 +1,6 @@
 package br.com.fiap.reloop.shared.web;
 
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -16,6 +17,13 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     public ResponseEntity<ApiError> handleApiException(ApiException exception) {
         return ResponseEntity.status(exception.status())
                 .body(ApiError.of(exception.status(), exception.code(), exception.getMessage()));
+    }
+
+    @ExceptionHandler(DataAccessException.class)
+    public ResponseEntity<ApiError> handlePersistenceFailure(DataAccessException failure) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(ApiError.of(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_SERVER_ERROR",
+                        "Não foi possível concluir a operação."));
     }
 
     @Override
