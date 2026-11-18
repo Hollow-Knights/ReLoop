@@ -34,7 +34,8 @@ Não execute novamente o inicializador nem o SQL original. Com o PostgreSQL
 existente disponível, faça backup e aplique V001 explicitamente em uma janela
 coordenada, antes de iniciar esta versão do backend. O comando abaixo escreve
 no banco do Compose; execute-o apenas quando tiver autorizado a migração desse
-banco. Nesta tarefa, ele foi executado somente em Testcontainers.
+banco. Se V001 já foi aplicada, não execute novamente esse comando; apenas inicie
+o backend. Os testes automatizados aplicam a migração somente em Testcontainers.
 
 ```sh
 docker compose exec -T postgres sh -c \
