@@ -48,9 +48,11 @@ public class JpaPhotoStorage implements PhotoStorage {
             Path newFile = path;
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override public void afterCompletion(int status) {
-                    if (status != STATUS_COMMITTED) {
+                    if (status == STATUS_ROLLED_BACK) {
                         try { Files.deleteIfExists(newFile); }
                         catch (IOException failure) { LOGGER.error("Não foi possível remover upload revertido", failure); }
+                    } else if (status == STATUS_UNKNOWN) {
+                        LOGGER.warn("Resultado transacional desconhecido para upload {}; arquivo preservado. Reconciliação necessária.", id);
                     }
                 }
             });
