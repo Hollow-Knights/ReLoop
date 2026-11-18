@@ -356,6 +356,12 @@ e executar no Mac. O Hibernate usa somente `ddl-auto=validate`; a aplicação
 não executa DDL ou seed na inicialização. As fotos exigem `PHOTO_STORAGE_DIR`
 persistente. Não ative `bootstrap` e `postgres` juntos.
 
+O inicializador aguarda o healthcheck TCP do banco, com limite padrão de
+60 segundos (`POSTGRES_INIT_TIMEOUT_SECONDS`, exportada no shell). Falha ou
+timeout interrompe a operação antes de executar SQL. Use-o somente em banco
+vazio; para bancos já preenchidos, inicie apenas o serviço com
+`docker compose up -d --wait --wait-timeout 60 postgres` e execute o backend.
+
 Os catálogos diferem entre os perfis. No SQL, o exemplo testado é Notebook,
 categoria 2, peso 2,300 kg, crédito 83, resgate de 80 e saldo 3. Os hashes e
 arquivos de fotos dos usuários demonstrativos têm as limitações documentadas
@@ -375,7 +381,10 @@ Com Java 21 e Docker Desktop ativo:
 Os testes usam PostgreSQL real em contêineres descartáveis e um diretório de
 fotos temporário. Não precisam de `.env`, banco criado manualmente ou JWT
 externo. Incluem concorrência, rollback e reinício com HTTP real, além da
-regressão bootstrap. Os relatórios ficam em `target/surefire-reports`.
+regressão bootstrap. Após a auditoria, a suíte tem 65 testes, incluindo leitura
+consistente de carteira, estados de conclusão de upload, inicialização limitada
+e casos negativos de JWT, IoT e fotografias. Os relatórios ficam em
+`target/surefire-reports`. Veja as [correções da auditoria](docs/database/postgres-audit-fixes.md).
 
 
 ## Estrutura

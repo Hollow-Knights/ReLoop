@@ -90,6 +90,11 @@ esse roteiro não deve ser executado em um banco importante.
   diminui estoque na mesma transação. Usuários diferentes disputando a mesma
   recompensa compartilham o lock da linha de estoque. A ordem carteira →
   recompensa é consistente entre resgates; o fluxo IoT não bloqueia recompensa.
+- **Leitura da carteira:** controller e service delegam ao adaptador sem abrir
+  transação externa. `JpaWalletAdapter.findByUserId` abre uma transação somente
+  de leitura com `REPEATABLE_READ`: totais e lançamentos são lidos do mesmo
+  snapshot, mesmo com resgate confirmado entre as duas consultas. As transações
+  de escrita mantêm seu isolamento e seus locks existentes.
 - **Movimentações:** o adaptador verifica titularidade, estado/valor da
   origem, magnitude positiva e duplicidade. Atualiza saldo e totais junto
   com o extrato; índices únicos protegem origem de crédito/débito. Os CHECKs
@@ -106,8 +111,14 @@ recusa escapes da raiz e links simbólicos. A leitura passa pela autorização
 de titularidade já existente. A URL absoluta vem de `PHOTO_BASE_URL` e a
 referência de associação continua sendo `photoId`.
 
-Se escrita ou transação dos metadados falhar, uma sincronização de rollback
-remove o arquivo novo. A aplicação não apaga as fotos ao encerrar. Banco e
+A sincronização remove o arquivo novo somente em `STATUS_ROLLED_BACK`, isto é,
+quando o rollback foi confirmado. Em `STATUS_COMMITTED`, o arquivo permanece.
+Em `STATUS_UNKNOWN`, ele também permanece, e um aviso com o UUID registra a
+necessidade de reconciliação: não se pode presumir que o banco desfez a operação.
+Quando o banco estiver disponível e o resultado tiver sido confirmado, a equipe
+pode conferir os metadados/arquivos antes de decidir sobre qualquer limpeza.
+Não foi implementado um sistema automático de reconciliação.
+A aplicação não apaga as fotos ao encerrar. Banco e
 filesystem devem ser mantidos juntos nos backups. Uma queda abrupta entre a
 escrita dos bytes e o commit pode deixar um arquivo sem metadados; filesystem
 não participa de uma transação distribuída. Não foi adicionada limpeza
@@ -125,14 +136,23 @@ cp .env.example .env
 # Preencha JWT_SECRET: openssl rand -base64 32
 # Preencha IOT_DEVICE_KEY: openssl rand -hex 32
 # Confira PHOTO_STORAGE_DIR; a pasta deve permanecer disponível após reinícios.
-docker compose up -d postgres
-./scripts/init-postgres.sh
 set -a
 . ./.env
 set +a
+# Somente na primeira execução, com o banco vazio:
+./scripts/init-postgres.sh
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres
 ```
 
+O inicializador inicia/aguarda o serviço Compose com `--wait` e
+`--wait-timeout`. O limite padrão é 60 segundos; exporte
+`POSTGRES_INIT_TIMEOUT_SECONDS` como inteiro positivo para alterá-lo. O exemplo
+acima exporta o valor do `.env` antes de chamar o script. Valores zero,
+negativos ou inválidos são recusados. Falha de subida ou timeout encerra o
+script com erro claro **antes de qualquer execução de SQL**.
+
+O healthcheck usa TCP em 127.0.0.1, evitando considerar o servidor temporário
+em socket Unix do entrypoint como disponível para a aplicação.
 O comando de inicialização é explícito e somente para banco vazio. Ele
 executa o arquivo original completo, inclusive as consultas demonstrativas.
 Uma segunda execução recusa a operação, retorna erro e não reaplica DDL ou
@@ -147,6 +167,14 @@ SQL original aplicado **uma vez**, com `spring.sql.init.mode=never` e
 carga em memória não é ativada no perfil postgres. Mudanças futuras de DDL
 precisarão de migrações versionadas acordadas com Hiago; não se deve reaplicar
 o arquivo inicial sobre dados existentes.
+
+Se o banco já estiver preenchido, **não execute o inicializador**. Com as
+variáveis do `.env` exportadas, as próximas subidas usam somente:
+
+```sh
+docker compose up -d --wait --wait-timeout "${POSTGRES_INIT_TIMEOUT_SECONDS:-60}" postgres
+./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres
+```
 
 Use `docker compose stop` para parar o banco preservando seu volume.
 Para usar um PostgreSQL já administrado fora do Compose, aplique o SQL
@@ -168,16 +196,32 @@ A base original é recarregada entre os métodos nos bancos descartáveis.
 
 | Classe | Execuções | Verificações |
 | --- | ---: | --- |
-| `PostgresIntegrationTest` | 24 | Mapeamento/seed, cadastro/login, hashes inválidos, perfil/e-mail, upload privado/associação, cancelamento, jornada, limites e precisão, snapshots, concorrência de fechamento/resgate/saldo/estoque/coletor, rollback de crédito/resgate/upload e segunda instância. |
-| `PostgresRestartHttpTest` | 1 | HTTP real com Java HttpClient/Tomcat. Cadastra, faz upload, descarta, credita e resgata; encerra aplicação/servidor/pool/JPA completamente, inicia outra e verifica usuário, bytes, carteira, respostas IoT e cupom idempotentes. |
-| `BootstrapRegressionTest` | 2 | Health, catálogo original de memória, cadastro/login e rejeição da precisão excedente sem PostgreSQL. |
+| `PostgresIntegrationTest` | 49 | Jornada e regressões anteriores; carteira consistente com resgate entre consultas; JWT ausente/malformado/expirado/assinatura e emissor incorretos/sem assinatura; isolamento; credenciais e payloads IoT; fotos ausentes/vazias/falsas/truncadas/GIF/grandes; PNG/JPEG; inicialização e rejeição da reaplicação em banco Testcontainers. |
+| `PostgresRestartHttpTest` | 1 | HTTP real/Tomcat, rejeição 413 de upload grande, encerramento completo, nova aplicação e recuperação de foto, usuário, carteira, eventos e cupom. |
+| `BootstrapRegressionTest` | 3 | Health, catálogo, cadastro/login, precisão e jornada completa com crédito/resgate/replays. Cada método tem contexto próprio. |
+| `PhotoCompletionTest` | 3 | Callback de commit, rollback e resultado desconhecido, com bytes reais e store simulado; retenção/limpeza e aviso de reconciliação. |
+| `PostgresInitializationScriptTest` | 9 | Script real com Docker CLI simulado: espera saudável com limite, timeout configurável, falha sem executar SQL, propagação de erro de banco preenchido e cinco valores inválidos de timeout. |
 
-Resultado em Java 21: **27 testes, 27 passaram, zero falhas, erros ou
-ignorados; BUILD SUCCESS**. A execução final está registrada nos relatórios
-`target/surefire-reports`. A auditoria SQL, a validação Hibernate, os testes
-de locks e os rollbacks usaram PostgreSQL real, sem H2. Os erros `test rollback`
-nos logs são falhas deliberadamente injetadas em triggers do banco descartável,
-removidas ao final de cada cenário.
+Resultado em Java 21 após as correções: **65 testes, 65 passaram, zero falhas,
+erros ou ignorados; BUILD SUCCESS** (`./mvnw clean verify`). Os relatórios estão
+em `target/surefire-reports`. Os 27 testes anteriores foram preservados.
+
+O teste da carteira intercala consultas e resgate usando latches, sem sleeps.
+Com o comportamento anterior `READ COMMITTED`, ele foi executado e falhou:
+o extrato continha dois lançamentos, mas os totais ainda eram anteriores ao
+débito. A correção foi restaurada automaticamente e a suíte passou. Não se
+reescreveram commits para essa comprovação.
+
+As verificações PostgreSQL, os locks e os rollbacks usam banco real, sem H2.
+`STATUS_UNKNOWN` é simulado no callback, sem provocar perda de conexão no
+banco de desenvolvimento. O script de inicialização foi exercitado com um CLI
+Docker simulado; seu SQL de proteção foi executado em um novo banco exclusivo
+do Testcontainers, com primeira execução bem-sucedida e reaplicação recusada.
+Nenhuma execução do inicializador foi feita no banco local preenchido.
+
+Os erros `test rollback` dos logs são falhas intencionais injetadas em triggers
+do banco descartável e removidas ao final de cada cenário. O aviso de upload
+com resultado desconhecido também é esperado no teste correspondente.
 
 Apenas o bootstrap pode ser verificado sem Docker com
 `./mvnw -Dtest=BootstrapRegressionTest test`; isso não substitui o verify completo.
@@ -199,5 +243,8 @@ Não foi importada a suíte da branch adiada nem foram acrescentados endpoints.
 - O SQL não é uma migração idempotente e suas fotos/hashes demonstrativos
   continuam com as limitações originais; nenhuma dessas lacunas foi escondida
   com dados inventados ou alterações silenciosas do esquema.
+
+A [estabilização após a auditoria](postgres-audit-fixes.md) registra as
+correções, o escopo das regressões e as limitações mantidas.
 
 Não houve push ou merge automático.
